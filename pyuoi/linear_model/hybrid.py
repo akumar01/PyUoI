@@ -139,6 +139,19 @@ class UoI_Hybrid(AbstractUoILinearRegressor):
         selection_coefs_lasso = np.zeros((buf_len, self.n_reg_params_lasso_, n_coef),
                                    dtype=np.float32)
 
+        # Elastic Net without intersection
+        selection_coefs_naive = np.zeros((self.n_reg_params_en_, n_coef))
+
+        for reg_param_idx, reg_params in enumerate(self.reg_params_en_):
+                # reset the regularization parameter
+                self.selection_lm1.set_params(**reg_params)
+                # rerun fit
+                self.selection_lm1.fit(X, y)
+                # store coefficients
+                selection_coefs_naive[reg_param_idx, :] = \
+                    self.selection_lm1.coef_.ravel()
+
+
         # iterate over bootstraps
         for bootstrap in range(chunk_size):
 
@@ -214,14 +227,20 @@ class UoI_Hybrid(AbstractUoILinearRegressor):
             self.supports_lasso_ = self.intersect(selection_coefs_lasso,
                                             self.selection_thresholds_)
 
+        self.supports_naive = selection_coefs_naive
         self.n_supports_en_ = self.supports_en_.shape[0]
         self.n_supports_lasso_ = self.supports_lasso_.shape[0]
 
-        pdb.set_trace()
         #####################
         # Estimation Module #
         #####################
         # set up data arrays
+
+        # As a first pass, proceed with the Elastic Net supports only in the estimation
+        # module
+
+        self.n_supports_ = self.n_supports_en_
+        self.supports_ = self.supports_en_
 
         chunk_size, buf_len = get_chunk_size(rank, size, self.n_boots_est)
 
