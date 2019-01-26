@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.linalg import norm
 import pdb
 from scipy.optimize import minimize
 
@@ -8,6 +9,8 @@ from sklearn.linear_model.coordinate_descent import _alpha_grid
 from sklearn.utils import check_array, check_X_y
 
 from .base import AbstractUoILinearRegressor
+
+import matplotlib.pyplot as plt
 
 
 class UoI_Spgrasso(AbstractUoILinearRegressor):
@@ -115,20 +118,25 @@ class UoI_Spgrasso(AbstractUoILinearRegressor):
 
 class SparseGroupLasso(ElasticNet):
 
+	# max_iter1: how many times to iterate over groups
+	# max_iter2: how many iterations to take in a given optimization within a given
+	# group
+	# Total number of iterations taken during optimization is therefore 
+	# groups * max_iter1 * max_iter2
 	def __init__(self, groups = None, alpha=1.0, l1_ratio=0.5, fit_intercept=True,
 				 normalize=False, precompute=False, max_iter=1000,
 				 copy_X=True, tol=1e-4, warm_start=False, positive=False,
-				 random_state=None, selection='cyclic'):
+				 random_state=None, selection='cyclic', max_iter1 = 1e2, max_iter2 =1e3):
 
 		super(SparseGroupLasso, self).__init__(
 		alpha=alpha, l1_ratio= l1_ratio, fit_intercept=fit_intercept,
 		normalize=normalize, precompute=precompute, copy_X=copy_X,
-		max_iter=max_iter, tol=tol, warm_start=warm_start,
-		positive=positive, random_state=random_state,
-		selection=selection)
+		tol=tol, warm_start=warm_start,	positive=positive,
+		random_state=random_state, selection=selection)
 
 		self.groups = groups
-
+		self.max_iter1 = int(max_iter1)
+		self.max_iter2 = int(max_iter2)
 
 	def spgrasso_penalty(self, beta, *args):
 		# args: alpha, l1_ratio, X, y, groups
@@ -143,11 +151,117 @@ class SparseGroupLasso(ElasticNet):
 		l2_group = 0
 		for group in groups:
 			group_est += np.dot(X[:, group], beta[group])
-			l2_group += np.sqrt(len(group)) * np.linalg.norm(beta[group])
+			l2_group += np.sqrt(len(group)) * norm(beta[group])**2
 
-		return np.linalg.norm(y.ravel() - group_est) + (1 - l1_ratio) * alpha * l2_group\
-				+ l1_ratio * alpha * np.linalg.norm(beta, 1)
+		return norm(y.ravel() - group_est)**2 + (1 - l1_ratio) * alpha * l2_group\
+				+ l1_ratio * alpha * norm(beta, 1)
 
+	def minimize(self, alpha, l1_ratio, X, y, beta_init = None):
+		n, p = X.shape
+		# Implement the algorithm described in the sparse group
+		# lasso paper
+
+		# IMPORTANT NOTES: alpha -> lambda in the paper, l1_ratio -> alpha
+		# ALSO: Paper drops sqrt(p_k) terms from the getgo. We have to be careful
+		# to modify all lambda (1 - alpha) terms from the paper's description of the
+		# algorithm to read sqrt(p_k) lambda (1 - alpha)
+
+		groups = self.groups
+
+		# Functions needed for optimization
+
+		# Soft thresholding operator:
+		S = lambda x, y: np.sign(x) * np.maximum(abs(x) - y, np.zeros(x.shape))
+
+		# Partial residual
+		r = lambda X, y, beta, group: y - np.dot(X, beta)\
+			+ np.dot(X[:, group], beta[group])
+
+		# Loss function
+		loss = lambda x, y: 1/(2 * x.shape[0]) * norm(x - y)**2
+
+		# Loss function gradient
+		grad_l = lambda X, r, group: -1* 1/X.shape[0] * X[:, group].T @ r
+
+		# Update formula
+		U = lambda X, r, beta_k, group, alpha, l1_ratio, t: \
+		np.maximum(1 - np.sqrt(len(beta_k)) * (t * (1 - l1_ratio) * alpha)\
+			/(norm(S(beta_k - t * grad_l(X, r, group), t * alpha * l1_ratio))), 0)\
+			* S(beta_k - t * grad_l(X, r, group), t * alpha * l1_ratio)
+		# Track solution change
+		Delta = lambda x1, x2: x2 - x1
+
+		# Track coefficient trajectories only for each sweep through the groups
+		# to save space
+		betas = np.zeros((p, self.max_iter2 + 1))
+
+		# Initialize beta if provided
+		if beta_init is not None:
+			betas[:, 0] = beta_init
+		else:
+			# random initialization
+			betas[:, 0] = np.random.uniform(-10, 10, p)
+
+		k = 0
+
+		while k < self.max_iter1:
+			for group in groups:
+				p_k = len(group)
+				# Check if group coefficients are identically zero:
+				if norm(S(X[:, group], alpha * l1_ratio)) <= np.sqrt(p_k) * (1 - l1_ratio) * alpha:
+					betas[group, 0] = 0
+					continue
+				else:
+
+					converged = 0
+					# Step size
+					t = 1
+					# Iteration counter 
+					l = 0
+
+					theta_2 = betas[group, 0, np.newaxis]
+
+					while (not converged) and (l < self.max_iter2 - 1):
+						# Center of majorizing functions:
+						beta = betas[:, l, np.newaxis]
+						beta_k = beta[group]
+						theta_1 = theta_2						
+						# Update step size until majorization condition is satisfied:
+						res = r(X, y, beta, group)
+						U0 = U(X, res, beta_k, group, alpha, l1_ratio, t)
+
+						while loss(res, X[:, group] @ U0) > loss(res, X[:, group] @ beta_k)\
+						 + grad_l(X, res, group).T @ Delta(beta_k, U0) + 1/(2 * t) \
+						 * norm(Delta(beta_k, U0))**2:
+
+							t *= 0.8
+
+						# Update theta:
+						theta_2 = U(X, y, beta_k, group, alpha, l1_ratio, t)
+
+						# Update betas:
+						# NOTE: we have started with l = 0, so we incremenet l and use this value
+						# in the update rule 
+
+						# Increment l
+						l += 1
+
+						betas[group, l] = (theta_1 + (l)/(l + 3) * (theta_2 - theta_1)).ravel()
+
+						# Check convergence:
+						if norm(Delta(beta_k.ravel(), betas[group, l])) <= self.tol:
+							converged = 1
+
+
+						if l == self.max_iter2 - 1:
+							print(norm(Delta(beta_k.ravel(), betas[group, l])))
+					# Set the initial set of betas for the next run equal to the last set of betas
+					# from this run:
+					betas[group, 0] = betas[group, l]
+
+			k += 1
+		pdb.set_trace()
+		return betas[:, 0]
 
 
 	def fit(self, X, y):
@@ -219,11 +333,13 @@ class SparseGroupLasso(ElasticNet):
 			else:
 				this_Xy = None
 
-			result = minimize(self.spgrasso_penalty, coef_,
-				args=(self.alpha, self.l1_ratio, X, y, self.groups), method='BFGS',
-				tol=self.tol)            
+			# result = minimize(self.spgrasso_penalty, np.random.uniform(-10, 10, n_features),
+			# 	args=(self.alpha, self.l1_ratio, X, y, self.groups), method='BFGS',
+			# 	tol=self.tol)            
 
-			coef_[k] = result.x
+			# coef_[k] = result.x
+
+			coef_[k] = self.minimize(self.alpha, self.l1_ratio, X, y)
 
 		if n_targets == 1:
 			self.coef_ = coef_[0]
