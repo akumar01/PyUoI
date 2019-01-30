@@ -201,7 +201,6 @@ class AbstractUoILinearModel(
         # initialize selection
         selection_coefs = np.zeros((buf_len, self.n_reg_params_, n_coef),
                                    dtype=np.float32)
-
         # iterate over bootstraps
         for bootstrap in range(chunk_size):
             # reset the coef between bootstraps

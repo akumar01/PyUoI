@@ -1,6 +1,6 @@
 from .base import AbstractUoILinearRegressor
 
-from sklearn.linear_model import Lasso, LinearRegression
+from sklearn.linear_model import Lasso, Ridge
 from sklearn.linear_model.coordinate_descent import _alpha_grid
 
 
@@ -11,7 +11,7 @@ class UoI_Lasso(AbstractUoILinearRegressor):
                  eps=1e-3, warm_start=True, estimation_score='r2',
                  copy_X=True, fit_intercept=True, normalize=True,
                  random_state=None, max_iter=1000,
-                 comm=None):
+                 comm=None, est_reg = 0.1):
         super(UoI_Lasso, self).__init__(
             n_boots_sel=n_boots_sel,
             n_boots_est=n_boots_est,
@@ -33,7 +33,10 @@ class UoI_Lasso(AbstractUoILinearRegressor):
             warm_start=warm_start,
             random_state=random_state
         )
-        self.__estimation_lm = LinearRegression()
+        self.__estimation_lm = Ridge(normalize = normalize,
+                                    fit_intercept = fit_intercept,
+                                    alpha = est_reg)
+
 
     @property
     def estimation_lm(self):
