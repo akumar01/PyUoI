@@ -1,4 +1,5 @@
 import numpy as np
+import pdb
 
 def stability_selection_to_threshold(stability_selection, n_boots):
     """Converts user inputted stability selection to an array of
@@ -79,7 +80,7 @@ def stability_selection_to_threshold(stability_selection, n_boots):
     return selection_thresholds
 
 
-def intersection(coefs, selection_thresholds=None):
+def intersection(coefs, reg_params, selection_thresholds=None):
     """Performs the intersection operation on selection coefficients
     using stability selection criteria.
 
@@ -115,6 +116,9 @@ def intersection(coefs, selection_thresholds=None):
         support is unique.
     """
 
+    # Specific to branch track_supports: Need a way to keep track of from which
+    # regularization parameter the set of final, unique supports emerges. 
+
     if selection_thresholds is None:
         selection_thresholds = np.array([coefs.shape[0]])
 
@@ -139,6 +143,12 @@ def intersection(coefs, selection_thresholds=None):
         (n_selection_thresholds * n_reg_params, n_features)
     ))
 
-    supports = np.unique(supports, axis=0)
+    unique_supports, counts = np.unique(supports, axis=0, return_counts = True)
+    # Assign to each unique_supports the set of regularization parameters of size counts using indices
+    support_reg_id = []
+    
+    for i in range(unique_supports.shape[0]):
+        idxs = np.argwhere(np.all(np.equal(supports, unique_supports[i, :]), 1))
+        support_reg_id.append([reg_params[idx] for idx in idxs.ravel()])
 
-    return supports
+    return unique_supports, support_reg_id

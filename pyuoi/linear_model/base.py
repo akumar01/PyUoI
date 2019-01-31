@@ -134,7 +134,7 @@ class AbstractUoILinearModel(
         pass
 
     @_abc.abstractmethod
-    def intersect(self, coef, thresholds):
+    def intersect(self, coef, reg_params, thresholds):
         """Intersect coefficients accross all thresholds"""
         pass
 
@@ -248,7 +248,7 @@ class AbstractUoILinearModel(
             supports = self.comm.bcast(supports, root=0)
             self.supports_ = supports
         else:
-            self.supports_ = self.intersect(selection_coefs,
+            self.supports_, self.support_reg_ids_ = self.intersect(selection_coefs, self.reg_params_,
                                             self.selection_thresholds_)
 
         self.n_supports_ = self.supports_.shape[0]
@@ -426,9 +426,9 @@ class AbstractUoILinearRegressor(
         """
         return X.shape
 
-    def intersect(self, coef, thresholds):
+    def intersect(self, coef, reg_params, thresholds):
         """Intersect coefficients accross all thresholds"""
-        return intersection(coef, thresholds)
+        return intersection(coef, reg_params, thresholds)
 
     @property
     def estimation_score(self):
