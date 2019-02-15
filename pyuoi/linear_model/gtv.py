@@ -12,10 +12,9 @@ from sklearn.utils import check_array, check_X_y
 from .base import AbstractUoILinearRegressor
 
 
-
 class UoI_GTV(AbstractUoILinearRegressor):
 
-    def __init__(self, lambda_1 = 48, lambda_TV = 48, alphas=np.array([0.5]),
+    def __init__(self, groups = None, n_lambdas=48, alphas=np.array([0.5]),
                  n_boots_sel=48, n_boots_est=48, selection_frac=0.9,
                  estimation_frac=0.9, stability_selection=1.,
                  estimation_score='r2', warm_start=True, eps=1e-3,
@@ -35,12 +34,14 @@ class UoI_GTV(AbstractUoILinearRegressor):
             random_state=random_state,
             comm=comm
         )
+
         self.n_lambdas = n_lambdas
         self.alphas = alphas
         self.n_alphas = len(alphas)
         self.warm_start = warm_start
         self.eps = eps
         self.lambdas = None
+
         self.__selection_lm = GraphTotalVariance(
             lambda_S = lambda_S,
             lambda_TV = lambda_TV,
@@ -210,12 +211,10 @@ class GraphTotalVariance(ElasticNet):
     # Transform the GTV objective into a quadratic programming problem
     # of the form 1/2 X^T Q X + a^T X subject to C X >= b where the first
     # meq constraints are equality constraints
+
+    # Transform the GTV objective into a quadratic programming problem
     def gtv_quadprog(self, *args):
 
-
-        #### Transform GTV into a generalized lasso ####
-
-        # args: lambda_S, lambda_TV, lambda_1, X, y, cov
         lambda_S = args[0]
         lambda_TV = args[1]
         lambda_1 = args[2]
@@ -244,7 +243,6 @@ class GraphTotalVariance(ElasticNet):
             e_kl[E[i][1]] = 1
             Gamma[i, :] = np.sqrt(cov[E[i][0], E[i][1]]) * (e_jl - np.sign(cov[E[i][0], E[i][1]]) * e_kl)
 
-        # Check shape of these!
         XX = np.concatenate([X, np.sqrt(n * lambda_S) * Gamma])
         YY = np.concatenate([y, np.zeros((len(E), 1))])
         GG = np.concatenate([lambda_TV * Gamma, np.identity(p)])
@@ -286,7 +284,6 @@ class GraphTotalVariance(ElasticNet):
 
         a = lambda_1 * np.ones(Q.shape[0]) - np.concatenate([a, -a]).ravel()
         return Q, a, C, b, U2.shape[1], GG
-
 
     # Test to see whether we can make ordinary lasso work with quadratic programming
     def lasso_quadprog(self, *args):
@@ -355,21 +352,6 @@ class GraphTotalVariance(ElasticNet):
 #        betas = coeffs
         return betas
 
-    def cvx_minimize(self, lambda_S, lambda_TV, lambda_1, X, y, cov):
-        Q, c, A, h = self.lasso_quadprog(lambda_1, X, y)
-
-        # Put matrices in proprietary cvxopt format
-        Q = 1/2 * (Q + Q.T)
-        args = [cvxopt.matrix(Q), cvxopt.matrix(c), cvxopt.matrix(A), cvxopt.matrix(h)]
-        sol = cvxopt.solvers.qp(*args)
-
-
-        coeffs_pm = np.array(sol['x']).reshape((Q.shape[1],))
-        coeffs = coeffs_pm[0:int(len(coeffs_pm)/2)] - coeffs_pm[int(len(coeffs_pm)/2)::]
-
-        return coeffs
-
-
     def fit(self, X, y, cov):
 
         """Fit model with coordinate descent.
@@ -431,8 +413,8 @@ class GraphTotalVariance(ElasticNet):
             else:
                 this_Xy = None
 
-#            coef_[k] = self.minimize(self.lambda_S, self.lambda_TV, self.lambda_1, X, y, cov)
-            coef_[k] = self.cvx_minimize(self.lambda_S, self.lambda_TV, self.lambda_1, X, y, cov)
+            coef_[k] = self.minimize(self.lambda_S, self.lambda_TV, self.lambda_1, X, y, cov)
+
         if n_targets == 1:
             self.coef_ = coef_[0]
         else:
