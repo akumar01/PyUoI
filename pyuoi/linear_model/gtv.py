@@ -208,13 +208,16 @@ class GraphTotalVariance(ElasticNet):
 
         return MST
 
+
     # Transform the GTV objective into a quadratic programming problem
     # of the form 1/2 X^T Q X + a^T X subject to C X >= b where the first
     # meq constraints are equality constraints
-
-    # Transform the GTV objective into a quadratic programming problem
     def gtv_quadprog(self, *args):
 
+
+        #### Transform GTV into a generalized lasso ####
+
+        # args: lambda_S, lambda_TV, lambda_1, X, y, cov
         lambda_S = args[0]
         lambda_TV = args[1]
         lambda_1 = args[2]
@@ -247,7 +250,6 @@ class GraphTotalVariance(ElasticNet):
         YY = np.concatenate([y, np.zeros((len(E), 1))])
         GG = np.concatenate([lambda_TV * Gamma, np.identity(p)])
 
-
         ### Transform generalized lasso into a constrained lasso ###
 
         # Singular value decomposition of GG:
@@ -274,6 +276,7 @@ class GraphTotalVariance(ElasticNet):
         C = np.concatenate([C, np.identity(C.shape[1])])
         b = np.zeros(C.shape[0])
 
+
         # Quadratic programming objective function
         Q =  1/n * XX.T @ XX
         a =  1/n * XX.T @ YY
@@ -294,19 +297,25 @@ class GraphTotalVariance(ElasticNet):
         n = X.shape[0]
         p = X.shape[1]
 
-        t = p/lambda1         
+
+#        t = 1/lambda1         
 
         # Constraints
         # Inequality constraint matrix:
-        A = np.concatenate([np.ones((1, 2 * p)), -1*np.identity(2 * p)])
-#        A = np.concatenate([np.identity(p), np.identity(p)], axis = 1)
-#        A = np.concatenate([A, np.identity(2 * p)])
+#        A = np.concatenate([np.ones((1, p)) , -1* np.ones((1, p))], axis = 1)
+#        A = np.concatenate([A, -1*np.identity(2 * p)])
 
+        A = np.identity(2 * p)
+    
         # Inequality constraint vector:
-        h = np.concatenate([np.array([t]), np.zeros(2*p)])
-#        h = np.concatenate([t*np.ones(p), np.zeros(2 * p)])
-        Q = 1/n*X.T @ X
-        c = 1/n*-X.T @ y
+#        h = np.concatenate([np.array([t]), np.zeros(2*p)])
+
+        # Coefficients must be greater than 0
+        h = np.zeros(2 * p)
+
+
+        Q = 1/n * X.T @ X
+        c = 1/n * X.T @ y
 
         # Enlarge the dimension of Q to handle the positive/negative decomposition
         QQ = np.concatenate([Q, -Q], axis = 1)
