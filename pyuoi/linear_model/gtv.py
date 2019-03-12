@@ -14,14 +14,14 @@ from .base import AbstractUoILinearRegressor
 
 class UoI_GTV(AbstractUoILinearRegressor):
 
-    def __init__(self, groups = None, n_lambdas=48, alphas=np.array([0.5]),
+    def __init__(self, lambda_1 = 48, lambda_TV = 48, alphas=np.array([0.5]),
                  n_boots_sel=48, n_boots_est=48, selection_frac=0.9,
                  estimation_frac=0.9, stability_selection=1.,
                  estimation_score='r2', warm_start=True, eps=1e-3,
                  copy_X=True, fit_intercept=True, normalize=True,
                  random_state=None, max_iter=1000,
                  comm=None):
-        super(UoI_Spgrasso, self).__init__(
+        super(UoI_GTV, self).__init__(
             n_boots_sel=n_boots_sel,
             n_boots_est=n_boots_est,
             selection_frac=selection_frac,
@@ -40,10 +40,10 @@ class UoI_GTV(AbstractUoILinearRegressor):
         self.warm_start = warm_start
         self.eps = eps
         self.lambdas = None
-        self.__selection_lm = SparseGroupLasso(
-            groups = groups,
-            fit_intercept=fit_intercept,
-            normalize=normalize,
+        self.__selection_lm = GraphTotalVariance(
+            lambda_S = lambda_S,
+            lambda_TV = lambda_TV,
+            lambda_1 = lambda_1,
             max_iter=max_iter,
             copy_X=copy_X,
             warm_start=warm_start,
@@ -114,15 +114,14 @@ class UoI_GTV(AbstractUoILinearRegressor):
 
 class GraphTotalVariance(ElasticNet):
 
-    # max_iter1: how many times to iterate over groups
-    # max_iter2: how many iterations to take in a given optimization within a given
-    # group
-    # Total number of iterations taken during optimization is therefore 
-    # groups * max_iter1 * max_iter2
+    # use_skeleton: Whether to use the minimum spanning tree instead of 
+    # the full covariance matrix
+
     def __init__(self, lambda_S, lambda_TV, lambda_1, fit_intercept=True,
                  normalize=False, precompute=False, max_iter=1000,
                  copy_X=True, tol=1e-4, warm_start=False, positive=False,
-                 random_state=None, selection='cyclic'):
+                 random_state=None, selection='cyclic', use_skeleton = False,
+                 threshold = False):
 
         super(GraphTotalVariance, self).__init__(
         fit_intercept=fit_intercept,
@@ -134,6 +133,75 @@ class GraphTotalVariance(ElasticNet):
         self.lambda_TV = lambda_TV
         self.lambda_1 = lambda_1
 
+    # Find the maximum spanning graph of the covariance matrix to speed up
+    # computation using Prim's algorithm.
+    def skeleton_graph(self, sigma):
+
+        p = sigma.shape[0]
+        
+        # Remove diagonal elements from sigma:
+        sigma = sigma - np.diag(np.diag(sigma))
+
+        # Following the terminology of the wikipedia page for Prim
+
+        # Deviate slightly from wikipedia here - what we ultimately want to 
+        # output is an adjacency matrix:
+        MST = np.identity(p)
+
+        # Set of vertices not yet associated with the MST
+        Q = np.arange(p)
+
+        # Candidate edge set
+        E = []
+        # Weights associated with candidate edge set
+        C = []
+
+        # Choose a vertex at random 
+        v = np.random.choice(Q)
+        Q = np.delete(Q, v)
+
+        while Q.size > 0:
+
+            # Add edge set of v to E. Edges are tuples. Ignore edges 
+            # that lead to vertices that have already been visited
+            edge_indices = np.arange(p)[sigma[v, :] != 0]
+
+            E.extend([(v, w) for w in edge_indices if w in Q])
+
+            # Add the associated weights to C
+            C.extend([sigma[v, w] for w in edge_indices if w in Q])
+
+            # Now select the edge in E that has the maximum edge weight
+            # associated with it
+
+            max_val = np.max(np.array(C))
+            max_idx = np.argmax(np.array(C))
+            try:
+                MST[E[max_idx][0], E[max_idx][1]] = max_val
+            except:
+                pdb.set_trace()
+
+            # Now, remove this edge from the list of edges and remove its edge weight
+            # from the list of edge weights
+            w = E[max_idx][1]
+
+            del E[max_idx]
+            del C[max_idx]
+            
+            # Remove the identified vertex from Q, and set v equal to it
+            try:
+                Q = np.delete(Q, np.where(Q == w))
+            except:
+                pdb.set_trace()
+            v = w
+
+        # Explicitly symmetrize:
+        MST = MST + MST.T
+
+        # Make the diagonal values half of what they are
+        MST = MST - np.identity(p)
+
+        return MST
 
     # Transform the GTV objective into a quadratic programming problem
     # of the form 1/2 X^T Q X + a^T X subject to C X >= b where the first
@@ -204,7 +272,6 @@ class GraphTotalVariance(ElasticNet):
         C = np.concatenate([C, np.identity(C.shape[1])])
         b = np.zeros(C.shape[0])
 
-
         # Quadratic programming objective function
         Q =  1/n * XX.T @ XX
         a =  1/n * XX.T @ YY
@@ -242,7 +309,6 @@ class GraphTotalVariance(ElasticNet):
         # Coefficients must be greater than 0
         h = np.zeros(2 * p)
 
-
         Q = 1/n * X.T @ X
         c = 1/n * X.T @ y
 
@@ -257,6 +323,13 @@ class GraphTotalVariance(ElasticNet):
 
     def minimize(self, lambda_S, lambda_TV, lambda_1, X, y, cov):
         # use quadratic programming to optimize the GTV loss function
+        
+        # To simplify things, EITHER calculate the minimum spanning tree or
+        # explicitly threshold
+        if self.use_skeleton:
+            cov = self.skeleton_graph(cov)
+        elif self.threshold:
+            cov[cov < 0.05] = 0
 
         Q, a, C, b, meq, D = self.gtv_quadprog(lambda_S, lambda_TV, lambda_1, X, y, cov)
 #        Q, a, C, b = self.lasso_quadprog(lambda_1, X, y)
