@@ -14,7 +14,7 @@ from .base import AbstractUoILinearRegressor
 
 class UoI_GTV(AbstractUoILinearRegressor):
 
-    def __init__(self, groups = None, n_lambdas=48, alphas=np.array([0.5]),
+    def __init__(self, lambda_1 = 48, lambda_TV = 48, alphas=np.array([0.5]),
                  n_boots_sel=48, n_boots_est=48, selection_frac=0.9,
                  estimation_frac=0.9, stability_selection=1.,
                  estimation_score='r2', warm_start=True, eps=1e-3,
@@ -41,7 +41,6 @@ class UoI_GTV(AbstractUoILinearRegressor):
         self.warm_start = warm_start
         self.eps = eps
         self.lambdas = None
-
         self.__selection_lm = GraphTotalVariance(
             lambda_S = lambda_S,
             lambda_TV = lambda_TV,
@@ -208,7 +207,6 @@ class GraphTotalVariance(ElasticNet):
 
         return MST
 
-
     # Transform the GTV objective into a quadratic programming problem
     # of the form 1/2 X^T Q X + a^T X subject to C X >= b where the first
     # meq constraints are equality constraints
@@ -276,7 +274,6 @@ class GraphTotalVariance(ElasticNet):
         C = np.concatenate([C, np.identity(C.shape[1])])
         b = np.zeros(C.shape[0])
 
-
         # Quadratic programming objective function
         Q =  1/n * XX.T @ XX
         a =  1/n * XX.T @ YY
@@ -312,7 +309,6 @@ class GraphTotalVariance(ElasticNet):
 
         # Coefficients must be greater than 0
         h = np.zeros(2 * p)
-
 
         Q = 1/n * X.T @ X
         c = 1/n * X.T @ y
