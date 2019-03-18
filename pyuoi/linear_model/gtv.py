@@ -133,6 +133,9 @@ class GraphTotalVariance(ElasticNet):
         self.lambda_TV = lambda_TV
         self.lambda_1 = lambda_1
 
+        self.use_skeleton = use_skeleton
+        self.threshold = threshold
+
     # Find the maximum spanning graph of the covariance matrix to speed up
     # computation using Prim's algorithm.
     def skeleton_graph(self, sigma):
