@@ -291,35 +291,48 @@ class GraphTotalVariance(ElasticNet):
         X = args[1]
         y = args[2]
 
-        n = X.shape[0]
-        p = X.shape[1]
+#         n = X.shape[0]
+#         p = X.shape[1]
 
 
-#        t = 1/lambda1         
+# #        t = 1/lambda1         
 
-        # Constraints
-        # Inequality constraint matrix:
-#        A = np.concatenate([np.ones((1, p)) , -1* np.ones((1, p))], axis = 1)
-#        A = np.concatenate([A, -1*np.identity(2 * p)])
+#         # Constraints
+#         # Inequality constraint matrix:
+# #        A = np.concatenate([np.ones((1, p)) , -1* np.ones((1, p))], axis = 1)
+# #        A = np.concatenate([A, -1*np.identity(2 * p)])
 
-        A = np.identity(2 * p)
+#         A = np.identity(2 * p)
     
-        # Inequality constraint vector:
-#        h = np.concatenate([np.array([t]), np.zeros(2*p)])
+#         # Inequality constraint vector:
+# #        h = np.concatenate([np.array([t]), np.zeros(2*p)])
 
-        # Coefficients must be greater than 0
-        h = np.zeros(2 * p)
+#         # Coefficients must be greater than 0
+#         h = np.zeros(2 * p)
 
-        Q = 1/n * X.T @ X
-        c = 1/n * X.T @ y
+#         Q = 1/n * X.T @ X
+#         c = 1/n * X.T @ y
+#         t = p/lambda1         
 
-        # Enlarge the dimension of Q to handle the positive/negative decomposition
-        QQ = np.concatenate([Q, -Q], axis = 1)
-        QQ = np.concatenate([QQ, -QQ])
+#         # Constraints
+#         # Inequality constraint matrix:
+#         A = np.concatenate([np.ones((1, 2 * p)), -1*np.identity(2 * p)])
+# #        A = np.concatenate([np.identity(p), np.identity(p)], axis = 1)
+# #        A = np.concatenate([A, np.identity(2 * p)])
 
-        cc = lambda1 * np.ones(2 * p) - np.concatenate([c, -c]).ravel()
+#         # Inequality constraint vector:
+#         h = np.concatenate([np.array([t]), np.zeros(2*p)])
+# #        h = np.concatenate([t*np.ones(p), np.zeros(2 * p)])
+#         Q = 1/n*X.T @ X
+#         c = 1/n*-X.T @ y
 
-        return QQ, cc, A, h
+#         # Enlarge the dimension of Q to handle the positive/negative decomposition
+#         QQ = np.concatenate([Q, -Q], axis = 1)
+#         QQ = np.concatenate([QQ, -QQ])
+
+#         cc = lambda1 * np.ones(2 * p) - np.concatenate([c, -c]).ravel()
+
+#         return QQ, cc, A, h
 
 
     def minimize(self, lambda_S, lambda_TV, lambda_1, X, y, cov):
@@ -356,6 +369,21 @@ class GraphTotalVariance(ElasticNet):
         betas = pinv(D) @ coeffs
 #        betas = coeffs
         return betas
+
+    def cvx_minimize(self, lambda_S, lambda_TV, lambda_1, X, y, cov):
+        Q, c, A, h = self.lasso_quadprog(lambda_1, X, y)
+
+        # Put matrices in proprietary cvxopt format
+        Q = 1/2 * (Q + Q.T)
+        args = [cvxopt.matrix(Q), cvxopt.matrix(c), cvxopt.matrix(A), cvxopt.matrix(h)]
+        sol = cvxopt.solvers.qp(*args)
+
+
+        coeffs_pm = np.array(sol['x']).reshape((Q.shape[1],))
+        coeffs = coeffs_pm[0:int(len(coeffs_pm)/2)] - coeffs_pm[int(len(coeffs_pm)/2)::]
+
+        return coeffs
+
 
     def fit(self, X, y, cov):
 
@@ -418,8 +446,8 @@ class GraphTotalVariance(ElasticNet):
             else:
                 this_Xy = None
 
-            coef_[k] = self.minimize(self.lambda_S, self.lambda_TV, self.lambda_1, X, y, cov)
-
+#            coef_[k] = self.minimize(self.lambda_S, self.lambda_TV, self.lambda_1, X, y, cov)
+            coef_[k] = self.cvx_minimize(self.lambda_S, self.lambda_TV, self.lambda_1, X, y, cov)
         if n_targets == 1:
             self.coef_ = coef_[0]
         else:
