@@ -1,5 +1,5 @@
 import numpy as np
-from numpy.linalg import norm
+from numpy.linalg import norm, svd, pinv
 import pdb
 from scipy.optimize import minimize
 import quadprog
@@ -9,21 +9,20 @@ from sklearn.linear_model import ElasticNet, LinearRegression
 from sklearn.linear_model.base import _pre_fit
 from sklearn.linear_model.coordinate_descent import _alpha_grid
 from sklearn.utils import check_array, check_X_y
-
 from .base import AbstractUoILinearRegressor
 
 
 
 class UoI_GTV(AbstractUoILinearRegressor):
 
-    def __init__(self, groups = None, n_lambdas=48, alphas=np.array([0.5]),
+    def __init__(self, lambda_1 = 48, lambda_TV = 48, alphas=np.array([0.5]),
                  n_boots_sel=48, n_boots_est=48, selection_frac=0.9,
                  estimation_frac=0.9, stability_selection=1.,
                  estimation_score='r2', warm_start=True, eps=1e-3,
                  copy_X=True, fit_intercept=True, normalize=True,
                  random_state=None, max_iter=1000,
                  comm=None):
-        super(UoI_Spgrasso, self).__init__(
+        super(UoI_GTV, self).__init__(
             n_boots_sel=n_boots_sel,
             n_boots_est=n_boots_est,
             selection_frac=selection_frac,
@@ -42,10 +41,10 @@ class UoI_GTV(AbstractUoILinearRegressor):
         self.warm_start = warm_start
         self.eps = eps
         self.lambdas = None
-        self.__selection_lm = SparseGroupLasso(
-            groups = groups,
-            fit_intercept=fit_intercept,
-            normalize=normalize,
+        self.__selection_lm = GraphTotalVariance(
+            lambda_S = lambda_S,
+            lambda_TV = lambda_TV,
+            lambda_1 = lambda_1,
             max_iter=max_iter,
             copy_X=copy_X,
             warm_start=warm_start,
@@ -114,20 +113,16 @@ class UoI_GTV(AbstractUoILinearRegressor):
         return reg_params
 
 
-
-
-
 class GraphTotalVariance(ElasticNet):
 
-    # max_iter1: how many times to iterate over groups
-    # max_iter2: how many iterations to take in a given optimization within a given
-    # group
-    # Total number of iterations taken during optimization is therefore 
-    # groups * max_iter1 * max_iter2
+    # use_skeleton: Whether to use the minimum spanning tree instead of 
+    # the full covariance matrix
+
     def __init__(self, lambda_S, lambda_TV, lambda_1, fit_intercept=True,
                  normalize=False, precompute=False, max_iter=1000,
                  copy_X=True, tol=1e-4, warm_start=False, positive=False,
-                 random_state=None, selection='cyclic'):
+                 random_state=None, selection='cyclic', use_skeleton = False,
+                 threshold = False):
 
         super(GraphTotalVariance, self).__init__(
         fit_intercept=fit_intercept,
@@ -139,9 +134,87 @@ class GraphTotalVariance(ElasticNet):
         self.lambda_TV = lambda_TV
         self.lambda_1 = lambda_1
 
+        self.use_skeleton = use_skeleton
+        self.threshold = threshold
+
+    # Find the maximum spanning graph of the covariance matrix to speed up
+    # computation using Prim's algorithm.
+    def skeleton_graph(self, sigma):
+
+        p = sigma.shape[0]
+        
+        # Remove diagonal elements from sigma:
+        sigma = sigma - np.diag(np.diag(sigma))
+
+        # Following the terminology of the wikipedia page for Prim
+
+        # Deviate slightly from wikipedia here - what we ultimately want to 
+        # output is an adjacency matrix:
+        MST = np.identity(p)
+
+        # Set of vertices not yet associated with the MST
+        Q = np.arange(p)
+
+        # Candidate edge set
+        E = []
+        # Weights associated with candidate edge set
+        C = []
+
+        # Choose a vertex at random 
+        v = np.random.choice(Q)
+        Q = np.delete(Q, v)
+
+        while Q.size > 0:
+
+            # Add edge set of v to E. Edges are tuples. Ignore edges 
+            # that lead to vertices that have already been visited
+            edge_indices = np.arange(p)[sigma[v, :] != 0]
+
+            E.extend([(v, w) for w in edge_indices if w in Q])
+
+            # Add the associated weights to C
+            C.extend([sigma[v, w] for w in edge_indices if w in Q])
+
+            # Now select the edge in E that has the maximum edge weight
+            # associated with it
+
+            max_val = np.max(np.array(C))
+            max_idx = np.argmax(np.array(C))
+            try:
+                MST[E[max_idx][0], E[max_idx][1]] = max_val
+            except:
+                pdb.set_trace()
+
+            # Now, remove this edge from the list of edges and remove its edge weight
+            # from the list of edge weights
+            w = E[max_idx][1]
+
+            del E[max_idx]
+            del C[max_idx]
+            
+            # Remove the identified vertex from Q, and set v equal to it
+            try:
+                Q = np.delete(Q, np.where(Q == w))
+            except:
+                pdb.set_trace()
+            v = w
+
+        # Explicitly symmetrize:
+        MST = MST + MST.T
+
+        # Make the diagonal values half of what they are
+        MST = MST - np.identity(p)
+
+        return MST
 
     # Transform the GTV objective into a quadratic programming problem
+    # of the form 1/2 X^T Q X + a^T X subject to C X >= b where the first
+    # meq constraints are equality constraints
     def gtv_quadprog(self, *args):
+
+
+        #### Transform GTV into a generalized lasso ####
+
         # args: lambda_S, lambda_TV, lambda_1, X, y, cov
         lambda_S = args[0]
         lambda_TV = args[1]
@@ -176,33 +249,43 @@ class GraphTotalVariance(ElasticNet):
         YY = np.concatenate([y, np.zeros((len(E), 1))])
         GG = np.concatenate([lambda_TV * Gamma, np.identity(p)])
 
+
+        ### Transform generalized lasso into a constrained lasso ###
+
+        # Singular value decomposition of GG:
+
+        U, S, V = svd(GG)
+
+        # GG will always have full column rank r = p. Divide into U_1 with dimension p and U_2 with dimension m - p
+        r = S.size
+        U1 = U[:, 0:r]
+        U2 = U[:, r::]
+
+        # Transform X
+        XX = XX @ pinv(GG)        
+
         # Constraints
-        # t is inversely proportional to lambda_1
-        t = 0.1/lambda_1          
 
-        # Break the beta coefficients into beta_+ and beta_-
+        # Equality constraints: U_2^T alpha = 0  (introduced by constrained lasso form)
+        # Break up alpha into alpha_+ and alpha_-
+        # Inequality constraints: All alpha_+ and alpha_- coefficients must be >= 0
 
-        # There are constraints that each vector of these be greater than 0 (need to check if we have to
-        # feed in that the negative of these coefficients be less than 0)
-        # Further constraint: the sum of beta_+ and beta_- must be less than or equal to t
+        # Horizontal tiling
+        C = np.concatenate([U2.T, -U2.T], axis = 1)
+        # Combine equality and inequality constraints
+        C = np.concatenate([C, np.identity(C.shape[1])])
+        b = np.zeros(C.shape[0])
 
-        # Inequality constraint matrix:
-        A = np.concatenate([np.ones((1, p)) , -1* np.ones((1, p))], axis = 1)
-        A = np.concatenate([A, -1*np.identity(2 * p)])
-
-        # Inequality constraint vector:
-        h = np.concatenate([np.array([t]), np.zeros(2*p)])
         # Quadratic programming objective function
-        Q =  XX.T @ XX
-        c =  -XX.T @ YY
+        Q =  1/n * XX.T @ XX
+        a =  1/n * XX.T @ YY
 
         # Enlarge the dimension of Q to handle the positive/negative decomposition
-        QQ = np.concatenate([Q, -Q], axis = 1)
-        QQ = np.concatenate([QQ, -QQ])
+        Q = np.concatenate([Q, -Q], axis = 1)
+        Q = np.concatenate([Q, -Q])
 
-        cc = np.concatenate([c, -c])
-
-        return QQ, cc, A, h
+        a = lambda_1 * np.ones(Q.shape[0]) - np.concatenate([a, -a]).ravel()
+        return Q, a, C, b, U2.shape[1], GG
 
 
     # Test to see whether we can make ordinary lasso work with quadratic programming
@@ -215,54 +298,67 @@ class GraphTotalVariance(ElasticNet):
         p = X.shape[1]
 
 
-        t = p/lambda1         
+#        t = 1/lambda1         
 
         # Constraints
         # Inequality constraint matrix:
-        A = np.concatenate([np.ones((1, 2 * p)), -1*np.identity(2 * p)])
-#        A = np.concatenate([np.identity(p), np.identity(p)], axis = 1)
-#        A = np.concatenate([A, np.identity(2 * p)])
+#        A = np.concatenate([np.ones((1, p)) , -1* np.ones((1, p))], axis = 1)
+#        A = np.concatenate([A, -1*np.identity(2 * p)])
 
+        A = np.identity(2 * p)
+    
         # Inequality constraint vector:
-        h = np.concatenate([np.array([t]), np.zeros(2*p)])
-#        h = np.concatenate([t*np.ones(p), np.zeros(2 * p)])
-        Q = 1/n*X.T @ X
-        c = 1/n*-X.T @ y
+#        h = np.concatenate([np.array([t]), np.zeros(2*p)])
+
+        # Coefficients must be greater than 0
+        h = np.zeros(2 * p)
+
+        Q = 1/n * X.T @ X
+        c = 1/n * X.T @ y
 
         # Enlarge the dimension of Q to handle the positive/negative decomposition
         QQ = np.concatenate([Q, -Q], axis = 1)
         QQ = np.concatenate([QQ, -QQ])
 
-        cc = np.concatenate([c, -c])
-
+        cc = lambda1 * np.ones(2 * p) - np.concatenate([c, -c]).ravel()
 
         return QQ, cc, A, h
 
 
     def minimize(self, lambda_S, lambda_TV, lambda_1, X, y, cov):
         # use quadratic programming to optimize the GTV loss function
+        
+        # To simplify things, EITHER calculate the minimum spanning tree or
+        # explicitly threshold
+        if self.use_skeleton:
+            cov = self.skeleton_graph(cov)
+        elif self.threshold:
+            cov[cov < 0.05] = 0
 
-#        Q, c, A, h = self.gtv_quadprog(lambda_S, lambda_TV, lambda_1, X, y, cov)
-        Q, c, A, h = self.lasso_quadprog(lambda_1, X, y)
+        Q, a, C, b, meq, D = self.gtv_quadprog(lambda_S, lambda_TV, lambda_1, X, y, cov)
+#        Q, a, C, b = self.lasso_quadprog(lambda_1, X, y)
+#        meq = 0
 
         # Need a symmetric, positive definite matrix for solvers 
-        Q = 1/2 * (Q + Q.T + np.identity(Q.shape[0]) * 1e-4)
+        Q = 1/2 * (Q + Q.T + np.identity(Q.shape[0]) * 1e-6)
 
-        # Negate the sign to match the standard form of the solve 
-        c = -c.ravel()
+        # quadprog subtracts the linear term
+        a = -a.ravel()
 
-        # Quadprog has >= inequality constraints whereas we formulate as <= constraints
-        A = -A.T
+        # Transpose C
+        C = C.T
 
-        h = -h
-
-        solution = quadprog.solve_qp(Q, c, A, h)
+        solution = quadprog.solve_qp(Q, a, C, b, meq)
 
         # Recover actual coefficients
+
         coeffs_pm = solution[0]
         coeffs = coeffs_pm[0:int(len(coeffs_pm)/2)] - coeffs_pm[int(len(coeffs_pm)/2)::]
 
-        return coeffs
+        # Invert the transformation on the betas
+        betas = pinv(D) @ coeffs
+#        betas = coeffs
+        return betas
 
     def cvx_minimize(self, lambda_S, lambda_TV, lambda_1, X, y, cov):
         Q, c, A, h = self.lasso_quadprog(lambda_1, X, y)
