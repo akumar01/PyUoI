@@ -15,8 +15,9 @@ from .base import AbstractUoILinearRegressor
 
 class UoI_GTV(AbstractUoILinearRegressor):
 
-    def __init__(self, lambda_1 = 48, lambda_TV = 48, alphas=np.array([0.5]),
-                 n_boots_sel=48, n_boots_est=48, selection_frac=0.9,
+    def __init__(self, lambda_1 = 1, lambda_TV = 1, lambda_S = 1,
+                 alphas=np.array([0.5]), n_boots_sel=48, 
+                 n_boots_est=48, selection_frac=0.9,
                  estimation_frac=0.9, stability_selection=1.,
                  estimation_score='r2', warm_start=True, eps=1e-3,
                  copy_X=True, fit_intercept=True, normalize=True,
@@ -35,12 +36,12 @@ class UoI_GTV(AbstractUoILinearRegressor):
             random_state=random_state,
             comm=comm
         )
-        self.n_lambdas = n_lambdas
-        self.alphas = alphas
-        self.n_alphas = len(alphas)
+
         self.warm_start = warm_start
         self.eps = eps
-        self.lambdas = None
+        self.lambda_S = lambda_S
+        self.lambda_TV = lambda_TV
+        self.lambda_1 = lambda_1
         self.__selection_lm = GraphTotalVariance(
             lambda_S = lambda_S,
             lambda_TV = lambda_TV,
@@ -90,25 +91,16 @@ class UoI_GTV(AbstractUoILinearRegressor):
             alpha->l1_ratio). This allows easy passing into the ElasticNet
             object.
         """
-        if self.lambdas is None:
-            self.lambdas = np.zeros((self.n_alphas, self.n_lambdas))
-            # a set of lambdas are generated for each alpha value (l1_ratio in
-            # sci-kit learn parlance)
-            for alpha_idx, alpha in enumerate(self.alphas):
-                self.lambdas[alpha_idx, :] = _alpha_grid(
-                    X=X, y=y,
-                    l1_ratio=alpha,
-                    fit_intercept=self.fit_intercept,
-                    eps=self.eps,
-                    n_alphas=self.n_lambdas,
-                    normalize=self.normalize)
 
         # place the regularization parameters into a list of dictionaries
         reg_params = list()
-        for alpha_idx, alpha in enumerate(self.alphas):
-            for lamb_idx, lamb in enumerate(self.lambdas[alpha_idx]):
-                # reset the regularization parameter
-                reg_params.append(dict(alpha=lamb, l1_ratio=alpha))
+        for l1_idx, l1 in enumerate(self.lambda_1):
+            for l2_idx, l2 in enumerate(self.lambda_S):
+                for l3_idx, l3 in enumerate(self.lambda_TV):
+                    # reset the regularization parameter
+                    reg_params.append(dict(lambda_1=l1, 
+                                           lambda_S=l2,
+                                           lambda_TV = l3))
 
         return reg_params
 
