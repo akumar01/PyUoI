@@ -287,55 +287,42 @@ class GraphTotalVariance(ElasticNet):
         a = lambda_1 * np.ones(Q.shape[0]) - np.concatenate([a, -a]).ravel()
         return Q, a, C, b, U2.shape[1], GG
 
+    # Test to see whether we can make ordinary lasso work with quadratic programming
+    def lasso_quadprog(self, *args):
+        lambda1 = args[0]
+        X = args[1]
+        y = args[2]
 
-#     # Test to see whether we can make ordinary lasso work with quadratic programming
-#     def lasso_quadprog(self, *args):
-#         lambda1 = args[0]
-#         X = args[1]
-#         y = args[2]
-
-#         n = X.shape[0]
-#         p = X.shape[1]
+        n = X.shape[0]
+        p = X.shape[1]
 
 
-# #        t = 1/lambda1         
+#        t = 1/lambda1         
 
-#         # Constraints
-#         # Inequality constraint matrix:
-# #        A = np.concatenate([np.ones((1, p)) , -1* np.ones((1, p))], axis = 1)
-# #        A = np.concatenate([A, -1*np.identity(2 * p)])
+        # Constraints
+        # Inequality constraint matrix:
+#        A = np.concatenate([np.ones((1, p)) , -1* np.ones((1, p))], axis = 1)
+#        A = np.concatenate([A, -1*np.identity(2 * p)])
 
-#         A = np.identity(2 * p)
+        A = np.identity(2 * p)
     
-#         # Inequality constraint vector:
-# #        h = np.concatenate([np.array([t]), np.zeros(2*p)])
+        # Inequality constraint vector:
+#        h = np.concatenate([np.array([t]), np.zeros(2*p)])
 
-#         # Coefficients must be greater than 0
-#         h = np.zeros(2 * p)
+        # Coefficients must be greater than 0
+        h = np.zeros(2 * p)
 
-#         Q = 1/n * X.T @ X
-#         c = 1/n * X.T @ y
-#         t = p/lambda1         
+        Q = 1/n * X.T @ X
+        c = 1/n * X.T @ y
 
-#         # Constraints
-#         # Inequality constraint matrix:
-#         A = np.concatenate([np.ones((1, 2 * p)), -1*np.identity(2 * p)])
-# #        A = np.concatenate([np.identity(p), np.identity(p)], axis = 1)
-# #        A = np.concatenate([A, np.identity(2 * p)])
+        # Enlarge the dimension of Q to handle the positive/negative decomposition
+        QQ = np.concatenate([Q, -Q], axis = 1)
+        QQ = np.concatenate([QQ, -QQ])
 
-#         # Inequality constraint vector:
-#         h = np.concatenate([np.array([t]), np.zeros(2*p)])
-# #        h = np.concatenate([t*np.ones(p), np.zeros(2 * p)])
-#         Q = 1/n*X.T @ X
-#         c = 1/n*-X.T @ y
+        cc = lambda1 * np.ones(2 * p) - np.concatenate([c, -c]).ravel()
 
-#         # Enlarge the dimension of Q to handle the positive/negative decomposition
-#         QQ = np.concatenate([Q, -Q], axis = 1)
-#         QQ = np.concatenate([QQ, -QQ])
+        return QQ, cc, A, h
 
-#         cc = lambda1 * np.ones(2 * p) - np.concatenate([c, -c]).ravel()
-
-#         return QQ, cc, A, h
 
 
     def minimize(self, lambda_S, lambda_TV, lambda_1, X, y, cov):
