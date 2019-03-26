@@ -8,6 +8,7 @@ from sklearn.linear_model.base import (
 from sklearn.metrics import r2_score, accuracy_score, log_loss
 from sklearn.model_selection import train_test_split
 from sklearn.utils import check_X_y
+from sklearn.feature_selection import mutual_info_regression
 
 from pyuoi import utils
 from pyuoi.mpi_utils import (Gatherv_rows, Bcast_from_root)
@@ -175,7 +176,7 @@ class AbstractUoILinearModel(
         """
         pass
 
-    def fit(self, X, y, stratify=None, verbose=False):
+    def fit(self, X, y, stratify=None, forward_selection = False, verbose=False):
         """Fit data according to the UoI algorithm.
 
         Parameters
@@ -333,7 +334,7 @@ class AbstractUoILinearModel(
                     random_state=self.random_state)
 
         # score (r2/AIC/AICc/BIC) for each bootstrap for each support
-        scores = np.zeros(tasks.size)
+            scores = np.zeros(tasks.size)
 
         n_tile = n_coef // n_features
         # iterate over bootstrap samples and supports
@@ -351,6 +352,44 @@ class AbstractUoILinearModel(
 
                 # compute ols estimate
                 self.estimation_lm.fit(X_rep[:, support], y_rep)
+
+
+                # Iteratively expand the support set
+                if forward_selection:
+                    support_ = np.copy(support)
+                    # Calculate the current estimation score
+                    current_score = self.score_predictions(
+                        metric = self.estimation_score,
+                        fitter = self.estimation_lm,
+                        X = X_test,
+                        y = y_test,
+                        support = support_)
+                    while True:
+
+                        # Add the feature that has the most 
+                        # mutual information with the response
+                        mutual_infos = mutual_info_regression(
+                                       X_rep[:, not support_], y_rep)
+                        support_[np.argmax(mutual_infos)] = True
+
+                        # Calculate the score of the model with the new
+                        # feature added
+                        self.estimation_lm.fit(X_rep[:, support_], y_rep)
+                        new_score = self.score_predictions(
+                        metric = self.estimation_score,
+                        fitter = self.estimation_lm,
+                        X = X_test,
+                        y = y_test,
+                        support = support_)
+
+                        if new_score <= current_score:
+                            support_[np.argmax(mutual_infos)] = False
+                            break
+                        else:
+                            print('Feature added!')
+
+                    support = support_
+
                 # store the fitted coefficients
                 estimates[ii, np.tile(support, n_tile)] = \
                     self.estimation_lm.coef_.ravel()
@@ -548,7 +587,7 @@ class AbstractUoILinearRegressor(
             score = -score
         return score
 
-    def fit(self, X, y, stratify=None, verbose=False):
+    def fit(self, X, y, forward_selection = False, stratify=None, verbose=False):
         """Fit data according to the UoI algorithm.
 
         Additionaly, perform X-y checks, data preprocessing, and setting
@@ -570,6 +609,9 @@ class AbstractUoILinearRegressor(
             than zero. Must be of size equal to the number of samples, with
             further restrictions on the number of groups.
 
+        forward_selection : Attempt to expand the suppport set in the 
+        estimation module
+
         verbose : boolean
             A switch indicating whether the fitting should print out messages
             displaying progress. Utilizes tqdm to indicate progress on
@@ -581,7 +623,8 @@ class AbstractUoILinearRegressor(
         # preprocess data
         X, y, X_offset, y_offset, X_scale = self.preprocess_data(X, y)
         super(AbstractUoILinearRegressor, self).fit(X, y, stratify=stratify,
-                                                    verbose=verbose)
+                                                forward_selection = forward_selection,
+                                                verbose=verbose)
 
         self._fit_intercept(X_offset, y_offset, X_scale)
         self.coef_ = np.squeeze(self.coef_)
