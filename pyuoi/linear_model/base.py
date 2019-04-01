@@ -397,7 +397,6 @@ class AbstractUoILinearModel(
             self.rp_max_idx_ = np.argmax(self.scores_, axis=1)
             # Iteratively expand these best performing support sets
             if forward_selection:
-            
                 # Assemble a separate set of estimates
                 forward_estimates = np.zeros((self.n_boots_est, n_coef))
 
