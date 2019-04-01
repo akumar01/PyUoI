@@ -392,7 +392,7 @@ class AbstractUoILinearModel(
                     for i, max_idx in enumerate(self.rp_max_idx_):
 
                         support_ = np.copy(self.supports_[max_idx])
-                        current_score = self.scores_[i, max_idx]
+                        current_score = scores[i, max_idx]
 
                         # Generate new bootstrap sample
                         idxs_train, idxs_test = train_test_split(
