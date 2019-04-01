@@ -371,40 +371,43 @@ class AbstractUoILinearModel(
 
         if self.comm is not None:
             estimates = Gatherv_rows(send=estimates, comm=self.comm,
-                                     root=0)
+                                         root=0)
             scores = Gatherv_rows(send=scores, comm=self.comm,
-                                  root=0)
-            self.rp_max_idx_ = None
-            best_estimates = None
-            coef = None
-            if rank == 0:
+                                      root=0)
+            # Distribute forward selection loops across processes
+            if forward_selection:
 
                 estimates = estimates.reshape(self.n_boots_est,
-                                              self.n_supports_, n_coef)
+                                                  self.n_supports_, n_coef)
                 scores = scores.reshape(self.n_boots_est, self.n_supports_)
                 self.rp_max_idx_ = np.argmax(scores, axis=1)
 
-                # Iteratively expand these best performing support sets
-                if forward_selection:
-                    # Assemble a separate set of estimates
-                    forward_estimates = np.zeros((self.n_boots_est, n_coef))
+                # Chunk
+                numproc = self.comm.Get_size()
+                chunk_param_list = np.array_split(np.arange(self.rp_max_idx_.size), numproc)
+                chunk_idx = rank
 
-                    for i, max_idx in enumerate(self.rp_max_idx_):
+                # Assemble a separate set of estimates
+                forward_estimates = np.zeros((len(chunk_param_list[chunk_idx]), n_coef))
 
-                        support_ = np.copy(self.supports_[max_idx])
-                        current_score = scores[i, max_idx]
+                for i, max_idx in enumerate(self.rp_max_idx_[chunk_param_list[chunk_idx]]):
 
-                        # Generate new bootstrap sample
-                        idxs_train, idxs_test = train_test_split(
-                        np.arange(X.shape[0]),
-                        test_size=1 - self.selection_frac,
-                        stratify=stratify,
-                        random_state=self.random_state)
+                    idx = chunk_param_list[chunk_idx][i]
 
-                        X_rep = X[idxs_train]
-                        X_test = X[idxs_test]
-                        y_rep = y[idxs_train]
-                        y_test = y[idxs_test]
+                    support_ = np.copy(self.supports_[max_idx])
+                    current_score = scores[idx, max_idx]
+
+                    # Generate new bootstrap sample
+                    idxs_train, idxs_test = train_test_split(
+                    np.arange(X.shape[0]),
+                    test_size=1 - self.selection_frac,
+                    stratify=stratify,
+                    random_state=self.random_state)
+
+                    X_rep = X[idxs_train]
+                    X_test = X[idxs_test]
+                    y_rep = y[idxs_train]
+                    y_test = y[idxs_test]
 
                         while True:
 
@@ -442,27 +445,38 @@ class AbstractUoILinearModel(
                         self.estimation_lm.fit(X_rep[:, support_], y_rep)
                         forward_estimates[i, support_] = self.estimation_lm.coef_
 
+            forward_estimates = Gatherv_rows(send=forward_estimates, comm=self.comm, root=0)
+            forward_estimates.reshape(self.n_boots_est, n_coef)
+            coef = None
+            if rank == 0:
+
                     coef = np.median(forward_estimates,
                                             axis = 0).reshape(n_tile, n_coef)
-                else:
+
+            self.coef_ = Bcast_from_root(coef, self.comm, root = 0)
+
+            else: # No forward selection
+                if rank == 0:
+
+                        estimates = estimates.reshape(self.n_boots_est,
+                                              self.n_supports_, n_coef)
+                        scores = scores.reshape(self.n_boots_est, self.n_supports_)
+                        self.rp_max_idx_ = np.argmax(scores, axis=1)
+
                     # extract the estimates over bootstraps from model with best
                     # regularization parameter value
                     best_estimates = self.estimates_[np.arange(self.n_boots_est),
-                                                     self.rp_max_idx_]
+                                                         self.rp_max_idx_]
 
                     # take the median across estimates for the final, bagged estimate
                     coef = np.median(best_estimates,
-                                           axis=0).reshape(n_tile, n_coef)
+                                     axis=0).reshape(n_tile, n_coef)
 
-                best_estimates = estimates[np.arange(self.n_boots_est),
-                                           self.rp_max_idx_]
-                # take the median across estimates for the final estimate
-                coef = np.median(best_estimates, axis=0).reshape(n_tile, n_coef)
-            self.estimates_ = Bcast_from_root(estimates, self.comm, root=0)
-            self.scores_ = Bcast_from_root(scores, self.comm, root=0)
-            self.coef_ = Bcast_from_root(coef, self.comm, root=0)
-            self.rp_max_idx_ = self.comm.bcast(self.rp_max_idx_, root=0)
-        else:
+                self.estimates_ = Bcast_from_root(estimates, self.comm, root=0)
+                self.scores_ = Bcast_from_root(scores, self.comm, root=0)
+                self.coef_ = Bcast_from_root(coef, self.comm, root=0)
+                self.rp_max_idx_ = self.comm.bcast(self.rp_max_idx_, root=0)
+        else: # No MPI
             self.estimates_ = estimates.reshape(self.n_boots_est,
                                                 self.n_supports_, n_coef)
             self.scores_ = scores.reshape(self.n_boots_est, self.n_supports_)
