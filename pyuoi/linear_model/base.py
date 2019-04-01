@@ -378,10 +378,82 @@ class AbstractUoILinearModel(
             best_estimates = None
             coef = None
             if rank == 0:
+
                 estimates = estimates.reshape(self.n_boots_est,
                                               self.n_supports_, n_coef)
                 scores = scores.reshape(self.n_boots_est, self.n_supports_)
                 self.rp_max_idx_ = np.argmax(scores, axis=1)
+
+                # Iteratively expand these best performing support sets
+                if forward_selection:
+                    # Assemble a separate set of estimates
+                    forward_estimates = np.zeros((self.n_boots_est, n_coef))
+
+                    for i, max_idx in enumerate(self.rp_max_idx_):
+
+                        support_ = np.copy(self.supports_[max_idx])
+                        current_score = self.scores_[i, max_idx]
+
+                        # Generate new bootstrap sample
+                        idxs_train, idxs_test = train_test_split(
+                        np.arange(X.shape[0]),
+                        test_size=1 - self.selection_frac,
+                        stratify=stratify,
+                        random_state=self.random_state)
+
+                        X_rep = X[idxs_train]
+                        X_test = X[idxs_test]
+                        y_rep = y[idxs_train]
+                        y_test = y[idxs_test]
+
+                        while True:
+
+                            present_features = np.count_nonzero(1 * support_)
+                            print('%d/%d features present' % (present_features, n_features))
+
+                            if present_features == n_features:
+                                break
+
+                            # Add the feature that has the most 
+                            # mutual information with the response
+                            mutual_infos = mutual_info_regression(
+                                           X_rep[:, np.invert(support_)], y_rep)
+                            support_[np.argmax(mutual_infos)] = True
+
+                            # Calculate the score of the model with the new
+                            # feature added
+                            self.estimation_lm.fit(X_rep[:, support_], y_rep)
+                            new_score = self.score_predictions(
+                            metric = self.estimation_score,
+                            fitter = self.estimation_lm,
+                            X = X_test,
+                            y = y_test,
+                            support = support_)
+
+                            print('New_score: %f' % new_score)
+
+                            if new_score <= current_score:
+                                support_[np.argmax(mutual_infos)] = False
+                                break
+
+                            current_score = new_score
+
+                        # Refit with the final support set
+                        self.estimation_lm.fit(X_rep[:, support_], y_rep)
+                        forward_estimates[i, support_] = self.estimation_lm.coef_
+
+                    coef = np.median(forward_estimates,
+                                            axis = 0).reshape(n_tile, n_coef)
+                else:
+                    # extract the estimates over bootstraps from model with best
+                    # regularization parameter value
+                    best_estimates = self.estimates_[np.arange(self.n_boots_est),
+                                                     self.rp_max_idx_]
+
+                    # take the median across estimates for the final, bagged estimate
+                    coef = np.median(best_estimates,
+                                           axis=0).reshape(n_tile, n_coef)
+
                 best_estimates = estimates[np.arange(self.n_boots_est),
                                            self.rp_max_idx_]
                 # take the median across estimates for the final estimate
