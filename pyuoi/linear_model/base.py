@@ -370,15 +370,13 @@ class AbstractUoILinearModel(
                     support=np.zeros(X_test.shape[1], dtype=bool))
 
         if self.comm is not None:
-            estimates = Gatherv_rows(send=estimates, comm=self.comm,
-                                         root=0)
             scores = Gatherv_rows(send=scores, comm=self.comm,
                                       root=0)
             # Distribute forward selection loops across processes
             if forward_selection:
-
-                estimates = estimates.reshape(self.n_boots_est,
-                                                  self.n_supports_, n_coef)
+                # Re-distribute
+                scores = Bcast_from_root(scores, comm=self.comm, root = 0)
+                
                 scores = scores.reshape(self.n_boots_est, self.n_supports_)
                 self.rp_max_idx_ = np.argmax(scores, axis=1)
 
@@ -409,7 +407,7 @@ class AbstractUoILinearModel(
                     y_rep = y[idxs_train]
                     y_test = y[idxs_test]
 
-                        while True:
+                    while True:
 
                             present_features = np.count_nonzero(1 * support_)
                             print('%d/%d features present' % (present_features, n_features))
@@ -441,21 +439,23 @@ class AbstractUoILinearModel(
 
                             current_score = new_score
 
-                        # Refit with the final support set
-                        self.estimation_lm.fit(X_rep[:, support_], y_rep)
-                        forward_estimates[i, support_] = self.estimation_lm.coef_
+                    # Refit with the final support set
+                    self.estimation_lm.fit(X_rep[:, support_], y_rep)
+                    forward_estimates[i, support_] = self.estimation_lm.coef_
 
-            forward_estimates = Gatherv_rows(send=forward_estimates, comm=self.comm, root=0)
-            forward_estimates.reshape(self.n_boots_est, n_coef)
-            coef = None
-            if rank == 0:
+                forward_estimates = Gatherv_rows(send=forward_estimates, comm=self.comm, root=0)
+                coef = None
+                if rank == 0:
 
-                    coef = np.median(forward_estimates,
-                                            axis = 0).reshape(n_tile, n_coef)
+                        forward_estimates.reshape(self.n_boots_est, n_coef)
+                        coef = np.median(forward_estimates,
+                                                axis = 0).reshape(n_tile, n_coef)
 
-            self.coef_ = Bcast_from_root(coef, self.comm, root = 0)
+                self.coef_ = Bcast_from_root(coef, self.comm, root = 0)
 
             else: # No forward selection
+                estimates = Gatherv_rows(send=estimates, comm=self.comm,
+                                             root=0)
                 if rank == 0:
 
                         estimates = estimates.reshape(self.n_boots_est,
@@ -463,13 +463,13 @@ class AbstractUoILinearModel(
                         scores = scores.reshape(self.n_boots_est, self.n_supports_)
                         self.rp_max_idx_ = np.argmax(scores, axis=1)
 
-                    # extract the estimates over bootstraps from model with best
-                    # regularization parameter value
-                    best_estimates = self.estimates_[np.arange(self.n_boots_est),
+                        # extract the estimates over bootstraps from model with best
+                        # regularization parameter value
+                        best_estimates = self.estimates_[np.arange(self.n_boots_est),
                                                          self.rp_max_idx_]
 
-                    # take the median across estimates for the final, bagged estimate
-                    coef = np.median(best_estimates,
+                        # take the median across estimates for the final, bagged estimate
+                        coef = np.median(best_estimates,
                                      axis=0).reshape(n_tile, n_coef)
 
                 self.estimates_ = Bcast_from_root(estimates, self.comm, root=0)
@@ -541,7 +541,7 @@ class AbstractUoILinearModel(
 
                 self.coef_ = np.median(forward_estimates,
                                         axis = 0).reshape(n_tile, n_coef)
-            else:
+            else: # No MPI, no forward selection
                 # extract the estimates over bootstraps from model with best
                 # regularization parameter value
                 best_estimates = self.estimates_[np.arange(self.n_boots_est),
