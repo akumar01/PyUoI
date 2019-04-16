@@ -11,6 +11,9 @@ from sklearn.linear_model.coordinate_descent import _alpha_grid
 from sklearn.utils import check_array, check_X_y
 from .base import AbstractUoILinearRegressor
 
+# Importing from pip-installed PyUoI
+from pyuoi.liblbfgs.__init__ import fmin_lbfgs
+
 
 class UoI_GTV(AbstractUoILinearRegressor):
 
@@ -108,12 +111,14 @@ class GraphTotalVariance(ElasticNet):
 
     # use_skeleton: Whether to use the minimum spanning tree instead of 
     # the full covariance matrix
+    # threshold: Threshold small values of the covariance matrix
+    # minimizer: Choice of minimizer 
 
     def __init__(self, lambda_S, lambda_TV, lambda_1, fit_intercept=True,
                  normalize=False, precompute=False, max_iter=1000,
                  copy_X=True, tol=1e-4, warm_start=False, positive=False,
                  random_state=None, selection='cyclic', use_skeleton = False,
-                 threshold = False):
+                 threshold = False, minimizer = 'quadprog'):
 
         super(GraphTotalVariance, self).__init__(
         fit_intercept=fit_intercept,
@@ -127,6 +132,7 @@ class GraphTotalVariance(ElasticNet):
 
         self.use_skeleton = use_skeleton
         self.threshold = threshold
+        self.minimizer = minimizer
 
     # Find the maximum spanning graph of the covariance matrix to speed up
     # computation using Prim's algorithm.
@@ -274,7 +280,30 @@ class GraphTotalVariance(ElasticNet):
         Q = np.concatenate([Q, -Q])
 
         a = lambda_1 * np.ones(Q.shape[0]) - np.concatenate([a, -a]).ravel()
-        return Q, a, C, b, U2.shape[1], GG
+
+        meq = U2.shape[1]
+
+        # Need a symmetric, positive definite matrix for solvers 
+        Q = 1/2 * (Q + Q.T + np.identity(Q.shape[0]) * 1e-6)
+
+        # quadprog subtracts the linear term
+        a = -a.ravel()
+
+        # Transpose C
+        C = C.T
+
+        # Feed into quadprog
+        solution = quadprog.solve_qp(Q, a, C, b, meq)
+
+        # Recover actual coefficients
+
+        coeffs_pm = solution[0]
+        coeffs = coeffs_pm[0:int(len(coeffs_pm)/2)] - coeffs_pm[int(len(coeffs_pm)/2)::]
+
+        # Invert the transformation on the betas
+        betas = pinv(D) @ coeffs
+
+        return betas
 
     # Test to see whether we can make ordinary lasso work with quadratic programming
     def lasso_quadprog(self, *args):
@@ -325,6 +354,39 @@ class GraphTotalVariance(ElasticNet):
 
 #         return QQ, cc, A, h
 
+    # For use in the lblgs solver included in PyUoI
+    def gtv_loss(self, beta, gradient, l1, ltv, ls, X, y, cov):
+        n = X.shape[0]
+        p = X.shape[1]
+
+        # Covariance weighted loss
+        cov_loss = 0
+        for j in range(p):
+            for k in range(p):
+                # Skip diagonal, just to be safe
+                if j == k:
+                    continue
+
+                cov_loss += ls * np.abs(cov[j, k]) * (beta[j] - np.sign(cov[j, k]) * beta[k])**2 + 
+                            ltv * l1 * np.sqrt(np.abs(cov[j, k])) * np.abs(beta[j] - np.sign(cov[j, k]) * beta[k])
+
+        lf = 1/n * norm(y - X @ beta, 2)**2 + cov_loss
+
+        # Covariance weighted part of the gradient
+        cov_gradient = 0
+        for j in range(p):
+            for k in range(p):
+                # Skip diagonal, just to be safe
+                if j == k:
+                    continue
+
+                cov_gradient += ls * np..abs(cov[j, k]) * (beta[j] - np.sign(cov[j, k]) * beta[k])**2 + 
+                                ltv * l1 * np.sqrt(np.abs(cov[j, k])) * np.sign(beta[j])
+
+        gradient = 2/n * (X.T @ X @ beta - X.T @ y) + cov_gradient   
+
+        return lf
+
 
     def minimize(self, lambda_S, lambda_TV, lambda_1, X, y, cov):
         # use quadratic programming to optimize the GTV loss function
@@ -336,29 +398,10 @@ class GraphTotalVariance(ElasticNet):
         elif self.threshold:
             cov[cov < 0.05] = 0
 
-        Q, a, C, b, meq, D = self.gtv_quadprog(lambda_S, lambda_TV, lambda_1, X, y, cov)
-#        Q, a, C, b = self.lasso_quadprog(lambda_1, X, y)
-#        meq = 0
-
-        # Need a symmetric, positive definite matrix for solvers 
-        Q = 1/2 * (Q + Q.T + np.identity(Q.shape[0]) * 1e-6)
-
-        # quadprog subtracts the linear term
-        a = -a.ravel()
-
-        # Transpose C
-        C = C.T
-
-        solution = quadprog.solve_qp(Q, a, C, b, meq)
-
-        # Recover actual coefficients
-
-        coeffs_pm = solution[0]
-        coeffs = coeffs_pm[0:int(len(coeffs_pm)/2)] - coeffs_pm[int(len(coeffs_pm)/2)::]
-
-        # Invert the transformation on the betas
-        betas = pinv(D) @ coeffs
-#        betas = coeffs
+        if self.minimizer == 'quadprog':
+           betas = self.gtv_quadprog(lambda_S, lambda_TV, lambda_1, X, y, cov)
+        elif self.minimizer == 'lblgs':
+            betas = fmin_lbfgs(self.gtv_loss, np.zeros(X.shape[1]), orthantwise_c = lambda_1)
         return betas
 
     def cvx_minimize(self, lambda_S, lambda_TV, lambda_1, X, y, cov):
