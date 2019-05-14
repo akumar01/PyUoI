@@ -1,6 +1,6 @@
 from sklearn.linear_model import Lasso, LinearRegression
 from sklearn.linear_model.coordinate_descent import _alpha_grid
-
+from sklearn.linear_model import RidgeCV
 from .base import AbstractUoILinearRegressor
 
 
@@ -33,7 +33,7 @@ class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
             warm_start=warm_start,
             random_state=random_state
         )
-        self.__estimation_lm = LinearRegression()
+        self.__estimation_lm = RidgeCV()
 
     @property
     def estimation_lm(self):
