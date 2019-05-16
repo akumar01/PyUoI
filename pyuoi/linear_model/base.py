@@ -144,6 +144,10 @@ class AbstractUoILinearModel(
     def score_predictions(self, metric, y_true, y_pred, supports):
         pass
 
+    @_abc.abstractstaticmethod
+    def adaptive_estimation_metrics(self, estimates, rss, X, y):
+        pass
+
     @_abc.abstractmethod
     def intersect(self, coef, thresholds):
         """Intersect coefficients accross all thresholds"""
@@ -402,9 +406,21 @@ class AbstractUoILinearModel(
             self.coef_ = Bcast_from_root(coef, self.comm, root=0)
             self.rp_max_idx_ = self.comm.bcast(self.rp_max_idx_, root=0)
         else:
+
             self.estimates_ = estimates.reshape(self.n_boots_est,
                                                 self.n_supports_, n_coef)
             self.scores_ = scores.reshape(self.n_boots_est, self.n_supports_)
+
+            # Data-driven estimation score penalty
+            if self.estimation_score == 'adaptive':
+                # Use all estimates across bootstraps
+                estimates_ = estimates.reshape((-1, n_coef))
+                scores_ = scores.reshape((-1, n_coef))
+                self.adaptive_estimation_metrics(estimates_, scores, X, y)
+
+            if self.estimation_score == 'adaptive':
+                estiamtes_ = estiamtes.re
+
             self.rp_max_idx_ = np.argmax(self.scores_, axis=1)
             # extract the estimates over bootstraps from model with best
             # regularization parameter value
@@ -463,7 +479,7 @@ class AbstractUoILinearRegressor(
     Intersections framework.
     """
 
-    __valid_estimation_metrics = ('r2', 'AIC', 'AICc', 'BIC')
+    __valid_estimation_metrics = ('r2', 'AIC', 'AICc', 'BIC', 'LOC', 'adaptive')
 
     def __init__(self, n_boots_sel=48, n_boots_est=48, selection_frac=0.9,
                  estimation_frac=0.9, stability_selection=1.,
@@ -541,11 +557,15 @@ class AbstractUoILinearRegressor(
         y_pred = fitter.predict(X[:, support])
         if metric == 'r2':
             score = r2_score(y, y_pred)
+        elif metric == 'adaptive':
+            # Store away the residual sum of squares for later use in adaptive
+            # model penalization
+            score = (y - y_pred)**2
         else:
             ll = utils.log_likelihood_glm(model='normal',
                                           y_true=y,
                                           y_pred=y_pred)
-            n_features = np.count_nonzero(support)
+                n_features = np.count_nonzero(support)
             n_samples = y.size
             if metric == 'BIC':
                 score = utils.BIC(ll, n_features, n_samples)
@@ -553,11 +573,58 @@ class AbstractUoILinearRegressor(
                 score = utils.AIC(ll, n_features)
             elif metric == 'AICc':
                 score = utils.AICc(ll, n_features, n_samples)
+            elif metric == 'LOC':
+                score = utils.LOC(y, y_pred, X, n_features)
             else:
                 raise ValueError(metric + ' is not a valid option.')
             # negate the score since lower information criterion is preferable
             score = -score
         return score
+
+    def adaptive_estimation_metric(self, P, rss, X, y):
+
+        n_models, n_features, n_samples = P.shape
+
+        # Number of perturbation to use for sensitivity estimation
+        T = 1000
+
+        # Peturbation strength
+        tau = 0.5
+
+        # Explore the region between no penalization on model size (r^2)
+        # and AIC penalty (lambda = 2)
+        Lambda = np.logspace(0, 2, 20)
+
+        M_hat = np.zeros((Lambda.size, n_features))
+
+        # Estimate the variance of the additive noise in the linear model
+        sigma_squared = ?        
+
+        # For each lambda, find the model that scores the best using the penalty
+        # defined by that lambda.Then, calculate the model sensitivity using 
+        # random perturbation
+        for i, l in enumerate(Lambda):
+            loss = [adaptive.loss(P[j, ...], y, l, sigma_squared) for j in n_models]
+            min_loss = np.argmin(loss)
+            M_hat[i, :] = P[max_score, ...] @ y
+
+            delta = np.random.multivariate_normal(np.zeros(n_samples), 0.25 * np.identity(n_samples),
+                                size = T)
+            dmudy = np.zeros()
+            for j, t in enumerate(T): 
+                # Perturb the data
+                yy = y + delta
+
+                # Recalculate the loss for all models
+                loss = [adaptive.loss(P[j, ...], y, l, sigma_squared + tau**2) for j in n_models]
+                min_loss = np.argmin(loss)
+
+
+        # Number of samples to use
+        T = 1000
+
+        for i, t in enumerate(T):
+
 
     def fit(self, X, y, stratify=None, verbose=False):
         """Fit data according to the UoI algorithm.

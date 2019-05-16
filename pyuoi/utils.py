@@ -215,3 +215,23 @@ def AICc(ll, n_features, n_samples):
     if n_samples > (n_features + 1):
         AICc += 2 * (n_features**2 + n_features) / (n_samples - n_features - 1)
     return AICc
+
+def LOC(y_true, y_pred, X, n_features):
+
+    n_samples = X.shape[0]
+
+    q = n_samples - n_features
+
+    beta_f = np.linalg.inv(X.T @ X) @ X.T @ y_true
+
+    # Estimate of the variance of the additive noise from the full model
+    sigma_F = (y_true - X @ beta_f).T @ (y_true - X @ beta_f)/(X.shape[0] - X.shape[1])
+
+    LOC = n_features + 1/n_samples * ((y_true - y_pred).T @ (y_true - y_pred)/sigma_F - q)**2
+
+    return LOC
+
+
+def adaptive_penalty():
+
+    
