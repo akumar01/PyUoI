@@ -321,11 +321,11 @@ class AbstractUoILinearModel(
         n_tile = n_coef // n_features
 
         if self.estimation_score == 'adaptive':
-            projectors = np.zeros((self.n_supports_, n_coef, n_samples))
+            pseudo_inverses = np.zeros((self.n_supports_, n_coef, n_samples))
             for i in range(self.n_supports_):
-                support = self.supports_[i]
-                projectors[i, np.tile(support, n_tile), :] = \
-                np.linalg.pinv(X[:, support])
+                support = self.supports_[i, :]
+                projector = np.diag(1 * support)
+                pseudo_inverses[i, ...] = np.linalg.pinv(X @ projector)
 
         tasks = np.array_split(np.arange(self.n_boots_est *
                                          self.n_supports_), size)[rank]
@@ -422,7 +422,7 @@ class AbstractUoILinearModel(
             # Data-driven estimation score penalty
             if self.estimation_score == 'adaptive':
                 # Use all estimates across bootstraps
-                penalty = adaptive_estimation_penalty(projectors, X, y)
+                penalty = adaptive_estimation_penalty(pseudo_inverses, self.supports_, X, y)
 
                 # Score all models using the adaptive penalty
                 self.scores_ = adaptively_score_models(self.estimates_, y, X, penalty)
