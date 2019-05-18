@@ -231,7 +231,4 @@ def LOC(y_true, y_pred, X, n_features):
 
     return LOC
 
-
-def adaptive_penalty():
-
     

@@ -1,7 +1,7 @@
 import abc as _abc
 import six as _six
 import numpy as np
-
+import pdb
 
 from sklearn.linear_model.base import _preprocess_data, SparseCoefMixin
 from sklearn.metrics import r2_score, accuracy_score, log_loss
@@ -12,7 +12,7 @@ from pyuoi import utils
 from pyuoi.mpi_utils import (Gatherv_rows, Bcast_from_root)
 
 from .utils import stability_selection_to_threshold, intersection
-from .adaptive import adaptive_estimation_score
+from .adaptive import adaptive_estimation_penalty, adaptively_score_models
 
 class AbstractUoILinearModel(
         _six.with_metaclass(_abc.ABCMeta, SparseCoefMixin)):
@@ -314,6 +314,19 @@ class AbstractUoILinearModel(
         # Estimation Module #
         #####################
         # set up data arrays
+
+        # Models for adaptive model penalization - fit using the entire data 
+        # to each candidate model support
+
+        n_tile = n_coef // n_features
+
+        if self.estimation_score == 'adaptive':
+            projectors = np.zeros((self.n_supports_, n_coef, n_samples))
+            for i in range(self.n_supports_):
+                support = self.supports_[i]
+                projectors[i, np.tile(support, n_tile), :] = \
+                np.linalg.pinv(X[:, support])
+
         tasks = np.array_split(np.arange(self.n_boots_est *
                                          self.n_supports_), size)[rank]
         my_boots = dict((task_idx // self.n_supports_, None)
@@ -343,10 +356,6 @@ class AbstractUoILinearModel(
         # score (r2/AIC/AICc/BIC) for each bootstrap for each support
         scores = np.zeros(tasks.size)
 
-        if self.estimation_score == 'adpative':
-            projectors = np.zeros((tasks.size, n_coef, n_samples))
-
-        n_tile = n_coef // n_features
         # iterate over bootstrap samples and supports
         for ii, task_idx in enumerate(tasks):
             boot_idx = task_idx // self.n_supports_
@@ -358,6 +367,7 @@ class AbstractUoILinearModel(
             X_test = X[idxs_test]
             y_rep = y[idxs_train]
             y_test = y[idxs_test]
+
             if np.any(support):
 
                 # compute ols estimate and store the fitted coefficients
@@ -368,8 +378,6 @@ class AbstractUoILinearModel(
                 else:
                     self.estimation_lm.fit(X_rep, y_rep, coef_mask=support)
                     estimates[ii] = self.estimation_lm.coef_.ravel()
-                    if self.estimation_score == 'adaptive':
-                        projectors[ii, ...] = np.linalg.pinv(X_rep[:, support])
                 scores[ii] = self.score_predictions(
                     metric=self.estimation_score,
                     fitter=self.estimation_lm,
@@ -414,9 +422,10 @@ class AbstractUoILinearModel(
             # Data-driven estimation score penalty
             if self.estimation_score == 'adaptive':
                 # Use all estimates across bootstraps
-                estimates_ = estimates.reshape((-1, n_coef))
-                scores_ = scores.reshape((-1, n_coef))
-                penalty = adaptive_estimation_metric(estimates_, scores, X, y)
+                penalty = adaptive_estimation_penalty(projectors, X, y)
+
+                # Score all models using the adaptive penalty
+                self.scores_ = adaptively_score_models(self.estimates_, y, X, penalty)
 
             self.rp_max_idx_ = np.argmax(self.scores_, axis=1)
             # extract the estimates over bootstraps from model with best
@@ -426,7 +435,6 @@ class AbstractUoILinearModel(
             # take the median across estimates for the final, bagged estimate
             self.coef_ = np.median(best_estimates, axis=0).reshape(n_tile,
                                                                    n_features)
-
         return self
 
     def uoi_selection_sweep(self, X, y, reg_param_values):
@@ -555,14 +563,13 @@ class AbstractUoILinearRegressor(
         if metric == 'r2':
             score = r2_score(y, y_pred)
         elif metric == 'adaptive':
-            # Store away the residual sum of squares for later use in adaptive
-            # model penalization
+            # Set these for nan for now
             score = np.nan
         else:
             ll = utils.log_likelihood_glm(model='normal',
                                           y_true=y,
                                           y_pred=y_pred)
-                n_features = np.count_nonzero(support)
+            n_features = np.count_nonzero(support)
             n_samples = y.size
             if metric == 'BIC':
                 score = utils.BIC(ll, n_features, n_samples)
