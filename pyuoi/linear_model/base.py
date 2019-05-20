@@ -183,39 +183,16 @@ class AbstractUoILinearModel(
         """
         pass
 
-    def fit(self, X, y, stratify=None, verbose=False):
-        """Fit data according to the UoI algorithm.
-
-        Parameters
-        ----------
-        X : ndarray or scipy.sparse matrix, (n_samples, n_features)
-            The design matrix.
-
-        y : ndarray, shape (n_samples,)
-            Response vector. Will be cast to X's dtype if necessary.
-            Currently, this implementation does not handle multiple response
-            variables.
-
-        stratify : array-like or None, default None
-            Ensures groups of samples are alloted to training/test sets
-            proportionally. Labels for each group must be an int greater
-            than zero. Must be of size equal to the number of samples, with
-            further restrictions on the number of groups.
-
-        verbose : boolean
-            A switch indicating whether the fitting should print out messages
-            displaying progress. Utilizes tqdm to indicate progress on
-            bootstraps.
-        """
-
-        # extract model dimensions
-        n_samples, n_coef = self.get_n_coef(X, y)
-        n_features = X.shape[1]
-
+    def selection(self, X, y, stratify = None, verbose = False):
         ####################
         # Selection Module #
         ####################
         # choose the regularization parameters for selection sweep
+        # extract model dimensions
+        n_samples, n_coef = self.get_n_coef(X, y)
+        n_features = X.shape[1]
+
+
         self.reg_params_ = self.get_reg_params(X, y)
         self.n_reg_params_ = len(self.reg_params_)
 
@@ -309,7 +286,9 @@ class AbstractUoILinearModel(
                                             self.selection_thresholds_)
 
         self.n_supports_ = self.supports_.shape[0]
+        return self
 
+    def estimation(self, X, y, stratify = None, verbose = False):
         #####################
         # Estimation Module #
         #####################
@@ -317,6 +296,16 @@ class AbstractUoILinearModel(
 
         # Models for adaptive model penalization - fit using the entire data 
         # to each candidate model support
+
+        # extract model dimensions
+        n_samples, n_coef = self.get_n_coef(X, y)
+        n_features = X.shape[1]
+
+        rank = 0
+        size = 1
+        if self.comm is not None:
+            rank = self.comm.rank
+            size = self.comm.size
 
         n_tile = n_coef // n_features
 
@@ -436,6 +425,38 @@ class AbstractUoILinearModel(
             self.coef_ = np.median(best_estimates, axis=0).reshape(n_tile,
                                                                    n_features)
         return self
+
+
+
+    def fit(self, X, y, stratify=None, verbose=False):
+        """Fit data according to the UoI algorithm.
+
+        Parameters
+        ----------
+        X : ndarray or scipy.sparse matrix, (n_samples, n_features)
+            The design matrix.
+
+        y : ndarray, shape (n_samples,)
+            Response vector. Will be cast to X's dtype if necessary.
+            Currently, this implementation does not handle multiple response
+            variables.
+
+        stratify : array-like or None, default None
+            Ensures groups of samples are alloted to training/test sets
+            proportionally. Labels for each group must be an int greater
+            than zero. Must be of size equal to the number of samples, with
+            further restrictions on the number of groups.
+
+        verbose : boolean
+            A switch indicating whether the fitting should print out messages
+            displaying progress. Utilizes tqdm to indicate progress on
+            bootstraps.
+        """
+        self.selection(X, y, stratify, verbose)
+        self.estimation(X, y, stratify, verbose)
+        return self
+
+
 
     def uoi_selection_sweep(self, X, y, reg_param_values):
         """Perform selection regression on a dataset over a sweep of
