@@ -94,3 +94,14 @@ def adaptively_score_models(models, y_true, X, lambda_hat):
 def loss_fn(y, estimate, var, M, lambda_):
     loss =  np.linalg.norm(y - estimate)**2 + lambda_ * M
     return loss
+
+def empirical_model_loss(y, y_pred, M, penalty):
+    n_samples = y.size
+    rss = (y.ravel() - y_pred.ravel())**2
+    if penalty == 'AICc':
+        model_size_penalty = 2 * M + (2 * M**2 + 2 * M)/(n_samples - M - 1)
+    else:
+        model_size_penalty = penalty * M
+    
+    llhood = n_samples/2 * (1 + np.log(np.mean(rss)))
+    return 2 * llhood + model_size_penalty, 2 * llhood, model_size_penalty

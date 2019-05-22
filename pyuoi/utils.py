@@ -131,7 +131,7 @@ def log_likelihood_glm(model, y_true, y_pred):
     if model == 'normal':
         # this log-likelihood is calculated under the assumption that the
         # variance is the value that maximize the log-likelihood
-        rss = (y_true - y_pred)**2
+        rss = (y_true.ravel() - y_pred.ravel())**2
         n_samples = y_true.size
         ll = -n_samples / 2 * (1 + np.log(np.mean(rss)))
     elif model == 'poisson':

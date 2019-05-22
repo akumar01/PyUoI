@@ -13,6 +13,7 @@ from pyuoi.mpi_utils import (Gatherv_rows, Bcast_from_root)
 
 from .utils import stability_selection_to_threshold, intersection
 from .adaptive import adaptive_estimation_penalty, adaptively_score_models
+from .adaptive import empirical_model_loss
 
 class AbstractUoILinearModel(
         _six.with_metaclass(_abc.ABCMeta, SparseCoefMixin)):
@@ -370,15 +371,15 @@ class AbstractUoILinearModel(
                 scores[ii] = self.score_predictions(
                     metric=self.estimation_score,
                     fitter=self.estimation_lm,
-                    X=X_test, y=y_test,
+                    X=X_rep, y=y_rep,
                     support=support)
             else:
                 fitter = self._fit_intercept_no_features(y_rep)
                 scores[ii] = self.score_predictions(
                     metric=self.estimation_score,
                     fitter=fitter,
-                    X=np.zeros_like(X_test), y=y_test,
-                    support=np.zeros(X_test.shape[1], dtype=bool))
+                    X=np.zeros_like(X_rep), y=y_rep,
+                    support=np.zeros(X_rep.shape[1], dtype=bool))
 
         if self.comm is not None:
             estimates = Gatherv_rows(send=estimates, comm=self.comm,
