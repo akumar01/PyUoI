@@ -369,15 +369,15 @@ class AbstractUoILinearModel(
                 scores[ii] = self.score_predictions(
                     metric=self.estimation_score,
                     fitter=self.estimation_lm,
-                    X=X_test, y=y_test,
+                    X=X_rep, y=y_rep,
                     support=support)
             else:
                 fitter = self._fit_intercept_no_features(y_rep)
                 scores[ii] = self.score_predictions(
                     metric=self.estimation_score,
                     fitter=fitter,
-                    X=np.zeros_like(X_test), y=y_test,
-                    support=np.zeros(X_test.shape[1], dtype=bool))
+                    X=np.zeros_like(X_rep), y=y_rep,
+                    support=np.zeros(X_rep.shape[1], dtype=bool))
 
         if self.comm is not None:
             estimates = Gatherv_rows(send=estimates, comm=self.comm,
