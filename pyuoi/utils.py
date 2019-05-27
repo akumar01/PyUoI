@@ -1,7 +1,7 @@
 """Utility functions for pyuoi package.
 """
 import numpy as np
-
+import pdb
 
 def softmax(y, axis=-1):
     """Calculates the softmax distribution.
@@ -215,3 +215,11 @@ def AICc(ll, n_features, n_samples):
     if n_samples > (n_features + 1):
         AICc += 2 * (n_features**2 + n_features) / (n_samples - n_features - 1)
     return AICc
+
+def unbiased_AIC(y_true, y_pred, n_features):
+    rss = np.sum((y_true.ravel() - y_pred.ravel())**2)
+    n_samples = y_true.size
+    sigma_sq = rss/(n_samples - n_features)
+
+    AIC = rss + 2 * n_features * sigma_sq
+    return AIC

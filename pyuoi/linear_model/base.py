@@ -2,7 +2,6 @@ import abc as _abc
 import six as _six
 import numpy as np
 
-
 from sklearn.linear_model.base import _preprocess_data, SparseCoefMixin
 from sklearn.metrics import r2_score, accuracy_score, log_loss
 from sklearn.model_selection import train_test_split
@@ -342,7 +341,7 @@ class AbstractUoILinearModel(
 
         # score (r2/AIC/AICc/BIC) for each bootstrap for each support
         scores = np.zeros(tasks.size)
-
+        alt_scores = np.zeros(tasks.size)
         n_tile = n_coef // n_features
         # iterate over bootstrap samples and supports
         for ii, task_idx in enumerate(tasks):
@@ -371,6 +370,12 @@ class AbstractUoILinearModel(
                     fitter=self.estimation_lm,
                     X=X_rep, y=y_rep,
                     support=support)
+                alt_scores[ii] = self.score_predictions(
+                    metric = self.estimation_score, 
+                    fitter = self.estimation_lm, 
+                    X= X_test, y=y_test,
+                    support= support)
+
             else:
                 fitter = self._fit_intercept_no_features(y_rep)
                 scores[ii] = self.score_predictions(
@@ -378,6 +383,11 @@ class AbstractUoILinearModel(
                     fitter=fitter,
                     X=np.zeros_like(X_rep), y=y_rep,
                     support=np.zeros(X_rep.shape[1], dtype=bool))
+                alt_scores[ii] = self.score_predictions(
+                    metric = self.estimation_score, 
+                    fitter = fitter, 
+                    X=np.zeros_like(X_test), y=y_test,
+                    support=np.zeros(X_test.shape[1], dtype=bool))
 
         if self.comm is not None:
             estimates = Gatherv_rows(send=estimates, comm=self.comm,
@@ -405,13 +415,26 @@ class AbstractUoILinearModel(
             self.estimates_ = estimates.reshape(self.n_boots_est,
                                                 self.n_supports_, n_coef)
             self.scores_ = scores.reshape(self.n_boots_est, self.n_supports_)
+            self.alt_scores_ = alt_scores.reshape(self.n_boots_est, self.n_supports_)
+
             self.rp_max_idx_ = np.argmax(self.scores_, axis=1)
+            self.alt_rp_max_idx_ = np.argmax(self.alt_scores_, axis = 1)
+
+
             # extract the estimates over bootstraps from model with best
             # regularization parameter value
             best_estimates = self.estimates_[np.arange(self.n_boots_est),
                                              self.rp_max_idx_, :]
+            self.best_estimates = best_estimates
+
+            alt_estimates = self.estimates_[np.arange(self.n_boots_est), 
+                                            self.alt_rp_max_idx_, :]
+
+            self.alt_estimates = alt_estimates 
             # take the median across estimates for the final, bagged estimate
             self.coef_ = np.median(best_estimates, axis=0).reshape(n_tile,
+                                                                   n_features)
+            self.alt_coef_ = np.median(alt_estimates, axis=0).reshape(n_tile,
                                                                    n_features)
 
         return self
@@ -541,6 +564,9 @@ class AbstractUoILinearRegressor(
         y_pred = fitter.predict(X[:, support])
         if metric == 'r2':
             score = r2_score(y, y_pred)
+        elif metric == 'unbiased_AIC':
+            n_features = np.count_nonzero(support)
+            score = -1 * utils.unbiased_AIC(y, y_pred, n_features)
         else:
             ll = utils.log_likelihood_glm(model='normal',
                                           y_true=y,
