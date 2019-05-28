@@ -223,3 +223,8 @@ def unbiased_AIC(y_true, y_pred, n_features):
 
     AIC = rss + 2 * n_features * sigma_sq
     return AIC
+
+# Manually set model complexity penalty
+def MIC(ll, n_features, penalty):
+
+    return penalty * n_features - 2 * ll

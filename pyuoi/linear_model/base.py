@@ -492,7 +492,7 @@ class AbstractUoILinearRegressor(
                  estimation_frac=0.9, stability_selection=1.,
                  estimation_score='r2', copy_X=True, fit_intercept=True,
                  normalize=True, random_state=None, max_iter=1000,
-                 comm=None):
+                 comm=None, manual_penalty = 2):
         super(AbstractUoILinearRegressor, self).__init__(
             n_boots_sel=n_boots_sel,
             n_boots_est=n_boots_est,
@@ -511,6 +511,7 @@ class AbstractUoILinearRegressor(
                 "invalid estimation metric: '%s'" % estimation_score)
 
         self.__estimation_score = estimation_score
+        self.manual_penalty = manual_penalty
 
     def preprocess_data(self, X, y):
         return _preprocess_data(
@@ -579,6 +580,8 @@ class AbstractUoILinearRegressor(
                 score = utils.AIC(ll, n_features)
             elif metric == 'AICc':
                 score = utils.AICc(ll, n_features, n_samples)
+            elif metric == 'MIC':
+                score = utils.MIC(ll, n_features, self.manual_penalty)
             else:
                 raise ValueError(metric + ' is not a valid option.')
             # negate the score since lower information criterion is preferable
