@@ -486,7 +486,7 @@ class AbstractUoILinearRegressor(
     Intersections framework.
     """
 
-    __valid_estimation_metrics = ('r2', 'AIC', 'AICc', 'BIC')
+    __valid_estimation_metrics = ('r2', 'AIC', 'AICc', 'BIC', 'MIC')
 
     def __init__(self, n_boots_sel=48, n_boots_est=48, selection_frac=0.9,
                  estimation_frac=0.9, stability_selection=1.,
