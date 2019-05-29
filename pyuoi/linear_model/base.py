@@ -1,7 +1,7 @@
 import abc as _abc
 import six as _six
 import numpy as np
-
+import pdb
 from sklearn.linear_model.base import _preprocess_data, SparseCoefMixin
 from sklearn.metrics import r2_score, accuracy_score, log_loss
 from sklearn.model_selection import train_test_split
@@ -394,11 +394,11 @@ class AbstractUoILinearModel(
                                      root=0)
             scores = Gatherv_rows(send=scores, comm=self.comm,
                                   root=0)
-            alt_scores = Gatherv_rows(send=scores, comm=self.comm, 
+            alt_scores = Gatherv_rows(send=alt_scores, comm=self.comm, 
                                     root=0)
 
             self.rp_max_idx_ = None
-            self.alt_rp_max_idx = None
+            self.alt_rp_max_idx_ = None
             
             best_estimates = None
             alt_estimates = None
@@ -413,16 +413,16 @@ class AbstractUoILinearModel(
                 alt_scores = alt_scores.reshape(self.n_boots_est, self.n_supports_)
 
                 self.rp_max_idx_ = np.argmax(scores, axis=1)
-                self.alt_rp_max_idx = np.argmax(self.alt_scores_, axis = 1)
+                self.alt_rp_max_idx_ = np.argmax(alt_scores, axis = 1)
                 best_estimates = estimates[np.arange(self.n_boots_est),
                                            self.rp_max_idx_]
-                alt_estimates = self.estimates_[np.arange(self.n_boots_est), 
+                alt_estimates = estimates[np.arange(self.n_boots_est), 
                                             self.alt_rp_max_idx_]
 
                 # take the median across estimates for the final estimate
                 coef = np.median(best_estimates, axis=0).reshape(n_tile,
                                                                  n_features)
-                alt_coef = np.median(alt_estimates, axis = 0).reshape(n_tiles,
+                alt_coef = np.median(alt_estimates, axis = 0).reshape(n_tile,
                                                                       n_features)
             self.estimates_ = Bcast_from_root(estimates, self.comm, root=0)
             self.alt_estimates_ = Bcast_from_root(alt_estimates, self.comm, root = 0)
@@ -649,6 +649,7 @@ class AbstractUoILinearRegressor(
 
         self._fit_intercept(X_offset, y_offset, X_scale)
         self.coef_ = np.squeeze(self.coef_)
+        
         return self
 
     def _fit_intercept_no_features(self, y):
