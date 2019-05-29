@@ -394,23 +394,47 @@ class AbstractUoILinearModel(
                                      root=0)
             scores = Gatherv_rows(send=scores, comm=self.comm,
                                   root=0)
+            alt_scores = Gatherv_rows(send=scores, comm=self.comm, 
+                                    root=0)
+
             self.rp_max_idx_ = None
+            self.alt_rp_max_idx = None
+            
             best_estimates = None
+            alt_estimates = None
+
             coef = None
+            alt_coef = None
+                       
             if rank == 0:
                 estimates = estimates.reshape(self.n_boots_est,
                                               self.n_supports_, n_coef)
                 scores = scores.reshape(self.n_boots_est, self.n_supports_)
+                alt_scores = alt_scores.reshape(self.n_boots_est, self.n_supports_)
+
                 self.rp_max_idx_ = np.argmax(scores, axis=1)
+                self.alt_rp_max_idx = np.argmax(self.alt_scores_, axis = 1)
                 best_estimates = estimates[np.arange(self.n_boots_est),
                                            self.rp_max_idx_]
+                alt_estimates = self.estimates_[np.arange(self.n_boots_est), 
+                                            self.alt_rp_max_idx_]
+
                 # take the median across estimates for the final estimate
                 coef = np.median(best_estimates, axis=0).reshape(n_tile,
                                                                  n_features)
+                alt_coef = np.median(alt_estimates, axis = 0).reshape(n_tiles,
+                                                                      n_features)
             self.estimates_ = Bcast_from_root(estimates, self.comm, root=0)
+            self.alt_estimates_ = Bcast_from_root(alt_estimates, self.comm, root = 0)
+
             self.scores_ = Bcast_from_root(scores, self.comm, root=0)
+            self.alt_scores_ = Bcast_from_root(alt_scores, self.comm, root = 0)
+
             self.coef_ = Bcast_from_root(coef, self.comm, root=0)
+            self.alt_coef_ = Bcast_from_root(alt_coef, self.comm, root = 0)
+
             self.rp_max_idx_ = self.comm.bcast(self.rp_max_idx_, root=0)
+            self.alt_rp_max_idx_ = self.comm.bcast(self.alt_rp_max_idx_, root = 0)
         else:
             self.estimates_ = estimates.reshape(self.n_boots_est,
                                                 self.n_supports_, n_coef)
