@@ -164,28 +164,32 @@ def BIC(ll, n_features, n_samples):
     return BIC
 
 
-def AIC(ll, n_features):
-    """Calculates the Akaike Information Criterion.
+# def AIC(ll, n_features):
+#     """Calculates the Akaike Information Criterion.
 
-    Parameters
-    ----------
-    ll : float
-        The log-likelihood of the model.
+#     Parameters
+#     ----------
+#     ll : float
+#         The log-likelihood of the model.
 
-    n_features : int
-        The number of features used in the model.
+#     n_features : int
+#         The number of features used in the model.
 
-    n_samples : int
-        The number of samples in the dataset being tested.
+#     n_samples : int
+#         The number of samples in the dataset being tested.
 
-    Returns
-    -------
-    AIC : float
-        Akaike Information Criterion
-    """
+#     Returns
+#     -------
+#     AIC : float
+#         Akaike Information Criterion
+#     """
 
-    AIC = 2 * n_features - 2 * ll
-    return AIC
+#     AIC = 2 * n_features - 2 * ll
+#     return AIC
+
+# Properly calculate the AIC as a bias corrected plug in estimator of the multivariate KL-divergence
+# def AIC(y, mu_hat, )
+
 
 
 def AICc(ll, n_features, n_samples):
@@ -215,14 +219,6 @@ def AICc(ll, n_features, n_samples):
     if n_samples > (n_features + 1):
         AICc += 2 * (n_features**2 + n_features) / (n_samples - n_features - 1)
     return AICc
-
-def unbiased_AIC(y_true, y_pred, n_features):
-    rss = np.sum((y_true.ravel() - y_pred.ravel())**2)
-    n_samples = y_true.size
-    sigma_sq = rss/(n_samples - n_features)
-
-    AIC = rss + 2 * n_features * sigma_sq
-    return AIC
 
 # Manually set model complexity penalty
 def MIC(ll, n_features, penalty):
