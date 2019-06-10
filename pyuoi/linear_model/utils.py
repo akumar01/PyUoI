@@ -1,5 +1,5 @@
 import numpy as np
-
+import pdb
 
 def stability_selection_to_threshold(stability_selection, n_boots):
     """Converts user inputted stability selection to an array of
@@ -82,7 +82,7 @@ def stability_selection_to_threshold(stability_selection, n_boots):
 
 def intersection(coefs, selection_thresholds=None):
     """Performs the intersection operation on selection coefficients
-    using stability selection criteria.
+        using stability selection criteria.
 
     The coefficients must be provided in the shape
         bootstraps x lambdas x features.
@@ -116,10 +116,31 @@ def intersection(coefs, selection_thresholds=None):
         support is unique.
     """
 
+    # Coefs is a list of size number of bootstraps 
+    pdb.set_trace()
+
     if selection_thresholds is None:
         selection_thresholds = np.array([coefs.shape[0]])
 
     n_selection_thresholds = len(selection_thresholds)
+
+
+    supports = np.zeros(n_selection_thresholds, n_features, dtype = bool)
+
+    # iterate over each stability selection threshold
+    for thres_idx, threshold in enumerate(selection_thresholds):
+        # Calculate the support given the specific selection threshold
+
+        # First convert the coefficient matrices in each bootstrap into
+        # a collection of unique supports
+        unique_supports = []
+        for boot_idx in range(len(coefs)):
+            unique_supports.extend(np.unique(coefs[i] != 0, axis = 0))
+
+        # Count the number of times each support occurs in the final list
+        unique_supports = np.array(unique_supports)
+
+
     n_reg_params = coefs.shape[1]
     n_features = coefs.shape[2]
     supports = np.zeros(
@@ -139,6 +160,7 @@ def intersection(coefs, selection_thresholds=None):
         supports,
         (n_selection_thresholds * n_reg_params, n_features)
     ))
+
 
     supports = np.unique(supports, axis=0)
 

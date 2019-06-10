@@ -4,6 +4,7 @@ import numpy as np
 
 
 from sklearn.linear_model.base import _preprocess_data, SparseCoefMixin
+from sklearn.linear_model import lars_path
 from sklearn.metrics import r2_score, accuracy_score, log_loss
 from sklearn.model_selection import train_test_split
 from sklearn.utils import check_X_y
@@ -236,8 +237,7 @@ class AbstractUoILinearModel(
             # split up bootstraps into processes
             tasks = np.array_split(np.arange(self.n_boots_sel),
                                    size)[rank]
-            selection_coefs = np.empty((tasks.size, self.n_reg_params_,
-                                        n_coef))
+            selection_coefs = [[] for i in range(tasks.size)]
             my_boots = dict((task_idx, None) for task_idx in tasks)
 
         for boot in range(self.n_boots_sel):
@@ -285,7 +285,7 @@ class AbstractUoILinearModel(
 
             # fit the coefficients
             selection_coefs[ii] = np.squeeze(
-                self.uoi_selection_sweep(X_rep, y_rep, my_reg_params))
+                self.uoi_selection_sweep(X_rep, y_rep))
 
         # if distributed, gather selection coefficients to 0,
         # perform intersection, and broadcast results
@@ -416,9 +416,9 @@ class AbstractUoILinearModel(
 
         return self
 
-    def uoi_selection_sweep(self, X, y, reg_param_values):
-        """Perform selection regression on a dataset over a sweep of
-        regularization parameter values.
+    def uoi_selection_sweep(self, X, y):
+        """Return all sets of distinct model supports for the Lasso problem
+        by computing the full solution path using LARS.
 
         Parameters
         ----------
@@ -438,20 +438,8 @@ class AbstractUoILinearModel(
             Predicted parameter values for each regularization strength.
         """
 
-        n_param_values = len(reg_param_values)
-        n_samples, n_coef = self.get_n_coef(X, y)
-
-        coefs = np.zeros((n_param_values, n_coef))
-
-        # apply the selection regression to bootstrapped datasets
-        for reg_param_idx, reg_params in enumerate(reg_param_values):
-            # reset the regularization parameter
-            self.selection_lm.set_params(**reg_params)
-            # rerun fit
-            self.selection_lm.fit(X, y)
-            # store coefficients
-            coefs[reg_param_idx] = self.selection_lm.coef_.ravel()
-
+        _, _, coefs = lars_path(X, y, max_iter = 500, method = 'lasso')
+        coefs = coefs.T
         return coefs
 
 
