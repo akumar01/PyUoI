@@ -2,7 +2,6 @@ import abc as _abc
 import six as _six
 import numpy as np
 
-
 from sklearn.linear_model.base import _preprocess_data, SparseCoefMixin
 from sklearn.linear_model import lars_path
 from sklearn.metrics import r2_score, accuracy_score, log_loss
@@ -10,7 +9,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.utils import check_X_y
 
 from pyuoi import utils
-from pyuoi.mpi_utils import (Gatherv_rows, Bcast_from_root)
+from mpi_utils.ndarray import (Gatherv_rows, Bcast_from_root, Gather_ndlist)
 
 from .utils import stability_selection_to_threshold, intersection
 
@@ -216,9 +215,6 @@ class AbstractUoILinearModel(
         ####################
         # Selection Module #
         ####################
-        # choose the regularization parameters for selection sweep
-        self.reg_params_ = self.get_reg_params(X, y)
-        self.n_reg_params_ = len(self.reg_params_)
 
         rank = 0
         size = 1
@@ -226,19 +222,11 @@ class AbstractUoILinearModel(
             rank = self.comm.rank
             size = self.comm.size
 
-        # initialize selection
-        if size > self.n_boots_sel:
-            tasks = np.array_split(np.arange(self.n_boots_sel *
-                                             self.n_reg_params_), size)[rank]
-            selection_coefs = np.empty((tasks.size, n_coef))
-            my_boots = dict((task_idx // self.n_reg_params_, None)
-                            for task_idx in tasks)
-        else:
-            # split up bootstraps into processes
-            tasks = np.array_split(np.arange(self.n_boots_sel),
-                                   size)[rank]
-            selection_coefs = [[] for i in range(tasks.size)]
-            my_boots = dict((task_idx, None) for task_idx in tasks)
+        # split up bootstraps into processes
+        tasks = np.array_split(np.arange(self.n_boots_sel),
+                               size)[rank]
+        selection_coefs = [[] for i in range(tasks.size)]
+        my_boots = dict((task_idx, None) for task_idx in tasks)
 
         for boot in range(self.n_boots_sel):
             if self.comm is not None:
@@ -263,21 +251,9 @@ class AbstractUoILinearModel(
         # iterate over bootstraps
         curr_boot_idx = None
         for ii, task_idx in enumerate(tasks):
-            if size > self.n_boots_sel:
-                boot_idx = task_idx // self.n_reg_params_
-                reg_idx = task_idx % self.n_reg_params_
-                my_reg_params = [self.reg_params_[reg_idx]]
-            else:
-                boot_idx = task_idx
-                my_reg_params = self.reg_params_
-            # Never warm start across bootstraps
-            if (curr_boot_idx != boot_idx) and hasattr(self.selection_lm,
-                                                       'coef_'):
-                self.selection_lm.coef_[:] = 0.
-            curr_boot_idx = boot_idx
 
             # draw a resampled bootstrap
-            idxs_train, idxs_test = my_boots[boot_idx]
+            idxs_train, idxs_test = my_boots[task_idx]
             X_rep = X[idxs_train]
             X_test = X[idxs_test]
             y_rep = y[idxs_train]
@@ -290,13 +266,9 @@ class AbstractUoILinearModel(
         # if distributed, gather selection coefficients to 0,
         # perform intersection, and broadcast results
         if self.comm is not None:
-            selection_coefs = Gatherv_rows(selection_coefs, self.comm, root=0)
+            selection_coefs = Gatherv_ndlist(selection_coefs, self.comm, root=0)
             if rank == 0:
-                if size > self.n_boots_sel:
-                    selection_coefs = selection_coefs.reshape(
-                        self.n_boots_sel,
-                        self.n_reg_params_,
-                        n_coef)
+
                 supports = self.intersect(
                     selection_coefs,
                     self.selection_thresholds_).astype(int)
