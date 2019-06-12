@@ -119,33 +119,58 @@ def intersection(coefs, selection_thresholds=None):
 
     # Coefs is a list of size number of bootstraps 
 
+    # if selection_thresholds is None:
+    #     selection_thresholds = np.array([coefs.shape[0]])
+
+    # n_selection_thresholds = len(selection_thresholds)
+
+    # supports = []
+
+    # # iterate over each stability selection threshold
+    # for thres_idx, threshold in enumerate(selection_thresholds):
+    #     # Calculate the support given by the specific selection threshold
+
+    #     # First convert the coefficient matrices in each bootstrap into
+    #     # a collection of unique supports
+    #     all_unique_supports = []
+    #     for boot_idx in range(len(coefs)):
+    #         boot_unique_supports = np.unique(coefs[boot_idx] != 0, axis = 0)
+    #         all_unique_supports.extend([tuple(boot_unique_supports[i, :])
+    #                                     for i in range(boot_unique_supports.shape[0])])
+
+    #     # Count the number of times each support occurs in the final list
+    #     support_cnt = Counter(all_unique_supports)
+        
+    #     # Filter by supports whose counts passes the threshold
+    #     thresholded_supports = {x: support_cnt[x] for x in support_cnt 
+    #                                               if support_cnt[x] >= threshold}
+    #     # Convert thresholded supports to array of supports
+    #     supports.extend([np.array(s) for s in thresholded_supports.keys()])
+
     if selection_thresholds is None:
         selection_thresholds = np.array([coefs.shape[0]])
 
     n_selection_thresholds = len(selection_thresholds)
-
-    supports = []
+    n_reg_params = coefs.shape[1]
+    n_features = coefs.shape[2]
+    supports = np.zeros(
+        (n_selection_thresholds, n_reg_params, n_features),
+        dtype=bool
+    )
 
     # iterate over each stability selection threshold
-    for thres_idx, threshold in enumerate(selection_thresholds):
-        # Calculate the support given by the specific selection threshold
+    for thresh_idx, threshold in enumerate(selection_thresholds):
+        # calculate the support given the specific selection threshold
+        supports[thresh_idx, ...] = \
+            np.count_nonzero(coefs, axis=0) >= threshold
 
-        # First convert the coefficient matrices in each bootstrap into
-        # a collection of unique supports
-        all_unique_supports = []
-        for boot_idx in range(len(coefs)):
-            boot_unique_supports = np.unique(coefs[boot_idx] != 0, axis = 0)
-            all_unique_supports.extend([tuple(boot_unique_supports[i, :])
-                                        for i in range(boot_unique_supports.shape[0])])
+    # unravel the dimension corresponding to selection thresholds
 
-        # Count the number of times each support occurs in the final list
-        support_cnt = Counter(all_unique_supports)
-        
-        # Filter by supports whose counts passes the threshold
-        thresholded_supports = {x: support_cnt[x] for x in support_cnt 
-                                                  if support_cnt[x] >= threshold}
-        # Convert thresholded supports to array of supports
-        supports.extend([np.array(s) for s in thresholded_supports.keys()])
+    supports = np.squeeze(np.reshape(
+        supports,
+        (n_selection_thresholds * n_reg_params, n_features)
+    ))
+
 
     # Take the final unique set
     supports = np.unique(supports, axis = 0)

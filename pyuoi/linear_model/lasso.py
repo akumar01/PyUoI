@@ -43,16 +43,16 @@ class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
     def selection_lm(self):
         return self.__selection_lm
 
-    def get_reg_params(self, X, y):
+    def get_reg_params(self, X, y, n_alphas):
         alphas = _alpha_grid(
             X=X, y=y,
             l1_ratio=1.0,
             fit_intercept=self.fit_intercept,
             eps=self.eps,
-            n_alphas=self.n_lambdas,
+            n_alphas=n_alphas   ,
             normalize=self.normalize
         )
-        return [{'alpha': a} for a in alphas]
+        return alphas
 
     def _fit_intercept(self, X_offset, y_offset, X_scale):
         """"Fit a model with an intercept and fixed coefficients.

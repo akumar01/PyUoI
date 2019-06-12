@@ -2,6 +2,8 @@ import abc as _abc
 import six as _six
 import numpy as np
 
+from scipy.interpolate import interp1d
+
 from sklearn.linear_model.base import _preprocess_data, SparseCoefMixin
 from sklearn.linear_model import lars_path
 from sklearn.metrics import r2_score, accuracy_score, log_loss
@@ -13,6 +15,7 @@ from mpi_utils.ndarray import (Gatherv_rows, Bcast_from_root, Gather_ndlist)
 
 from .utils import stability_selection_to_threshold, intersection
 
+import pdb
 
 class AbstractUoILinearModel(
         _six.with_metaclass(_abc.ABCMeta, SparseCoefMixin)):
@@ -216,6 +219,11 @@ class AbstractUoILinearModel(
         # Selection Module #
         ####################
 
+        # Densely sample the regularization path 
+        # as we can do this very cheaply
+        self.n_reg_params_ = 10 * n_coef
+        self.reg_params_ = self.get_reg_params(X, y, self.n_reg_params_)
+
         rank = 0
         size = 1
         if self.comm is not None:
@@ -225,7 +233,7 @@ class AbstractUoILinearModel(
         # split up bootstraps into processes
         tasks = np.array_split(np.arange(self.n_boots_sel),
                                size)[rank]
-        selection_coefs = [[] for i in range(tasks.size)]
+        selection_coefs = np.empty((tasks.size, self.n_reg_params_, n_coef))
         my_boots = dict((task_idx, None) for task_idx in tasks)
 
         for boot in range(self.n_boots_sel):
@@ -261,7 +269,7 @@ class AbstractUoILinearModel(
 
             # fit the coefficients
             selection_coefs[ii] = np.squeeze(
-                self.uoi_selection_sweep(X_rep, y_rep))
+                self.uoi_selection_sweep(X_rep, y_rep, self.reg_params_))
 
         # if distributed, gather selection coefficients to 0,
         # perform intersection, and broadcast results
@@ -388,7 +396,7 @@ class AbstractUoILinearModel(
 
         return self
 
-    def uoi_selection_sweep(self, X, y):
+    def uoi_selection_sweep(self, X, y, reg_params):
         """Return all sets of distinct model supports for the Lasso problem
         by computing the full solution path using LARS.
 
@@ -414,8 +422,14 @@ class AbstractUoILinearModel(
 
         max_iter = max(500, 2*n_features)
 
-        _, _, coefs = lars_path(X, y, max_iter = max_iter, method = 'lasso')
+        alphas, _, coefs = lars_path(X, y, max_iter = max_iter, method = 'lasso')
+        
+        # Interpolate to get the coefficients at the desired reg_param values:
+        coef_path = interp1d(alphas, coefs, fill_value = 'extrapolate')
+
+        coefs = coef_path(reg_params)
         coefs = coefs.T
+
         return coefs
 
 
