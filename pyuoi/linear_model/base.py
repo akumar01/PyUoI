@@ -410,7 +410,11 @@ class AbstractUoILinearModel(
             Predicted parameter values for each regularization strength.
         """
 
-        _, _, coefs = lars_path(X, y, max_iter = 500, method = 'lasso')
+        n_features = X.shape[1]
+
+        max_iter = max(500, 2*n_features)
+
+        _, _, coefs = lars_path(X, y, max_iter = max_iter, method = 'lasso')
         coefs = coefs.T
         return coefs
 
