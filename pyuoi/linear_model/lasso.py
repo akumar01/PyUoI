@@ -52,6 +52,7 @@ class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
             n_alphas=n_alphas   ,
             normalize=self.normalize
         )
+
         return alphas
 
     def _fit_intercept(self, X_offset, y_offset, X_scale):

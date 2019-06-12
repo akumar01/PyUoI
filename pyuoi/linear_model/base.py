@@ -221,7 +221,7 @@ class AbstractUoILinearModel(
 
         # Densely sample the regularization path 
         # as we can do this very cheaply
-        self.n_reg_params_ = 10 * n_coef
+        self.n_reg_params_ = n_coef
         self.reg_params_ = self.get_reg_params(X, y, self.n_reg_params_)
 
         rank = 0
