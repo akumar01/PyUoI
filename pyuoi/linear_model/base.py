@@ -266,7 +266,7 @@ class AbstractUoILinearModel(
         # if distributed, gather selection coefficients to 0,
         # perform intersection, and broadcast results
         if self.comm is not None:
-            selection_coefs = Gatherv_ndlist(selection_coefs, self.comm, root=0)
+            selection_coefs = Gather_ndlist(selection_coefs, self.comm, root=0)
             if rank == 0:
 
                 supports = self.intersect(
