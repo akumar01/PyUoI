@@ -371,8 +371,8 @@ class AbstractUoILinearModel(
                     X=X_rep, y=y_rep,
                     support=support)
                 alt_scores[ii] = self.score_predictions(
-                    metric = self.estimation_score, 
-                    fitter = self.estimation_lm, 
+                    metric = self.estimation_score,
+                    fitter = self.estimation_lm,
                     X= X_test, y=y_test,
                     support= support)
 
@@ -384,8 +384,8 @@ class AbstractUoILinearModel(
                     X=np.zeros_like(X_rep), y=y_rep,
                     support=np.zeros(X_rep.shape[1], dtype=bool))
                 alt_scores[ii] = self.score_predictions(
-                    metric = self.estimation_score, 
-                    fitter = fitter, 
+                    metric = self.estimation_score,
+                    fitter = fitter,
                     X=np.zeros_like(X_test), y=y_test,
                     support=np.zeros(X_test.shape[1], dtype=bool))
 
@@ -394,18 +394,18 @@ class AbstractUoILinearModel(
                                      root=0)
             scores = Gatherv_rows(send=scores, comm=self.comm,
                                   root=0)
-            alt_scores = Gatherv_rows(send=alt_scores, comm=self.comm, 
+            alt_scores = Gatherv_rows(send=alt_scores, comm=self.comm,
                                     root=0)
 
             self.rp_max_idx_ = None
             self.alt_rp_max_idx_ = None
-            
+
             best_estimates = None
             alt_estimates = None
 
             coef = None
             alt_coef = None
-                       
+
             if rank == 0:
                 estimates = estimates.reshape(self.n_boots_est,
                                               self.n_supports_, n_coef)
@@ -416,7 +416,7 @@ class AbstractUoILinearModel(
                 self.alt_rp_max_idx_ = np.argmax(alt_scores, axis = 1)
                 best_estimates = estimates[np.arange(self.n_boots_est),
                                            self.rp_max_idx_]
-                alt_estimates = estimates[np.arange(self.n_boots_est), 
+                alt_estimates = estimates[np.arange(self.n_boots_est),
                                             self.alt_rp_max_idx_]
 
                 # take the median across estimates for the final estimate
@@ -451,10 +451,10 @@ class AbstractUoILinearModel(
                                              self.rp_max_idx_, :]
             self.best_estimates = best_estimates
 
-            alt_estimates = self.estimates_[np.arange(self.n_boots_est), 
+            alt_estimates = self.estimates_[np.arange(self.n_boots_est),
                                             self.alt_rp_max_idx_, :]
 
-            self.alt_estimates = alt_estimates 
+            self.alt_estimates = alt_estimates
             # take the median across estimates for the final, bagged estimate
             self.coef_ = np.median(best_estimates, axis=0).reshape(n_tile,
                                                                    n_features)
@@ -643,13 +643,13 @@ class AbstractUoILinearRegressor(
         X, y = check_X_y(X, y, accept_sparse=['csr', 'csc', 'coo'],
                          y_numeric=True, multi_output=True)
         # preprocess data
-        X, y, X_offset, y_offset, X_scale = self.preprocess_data(X, y)
+        # X, y, X_offset, y_offset, X_scale = self.preprocess_data(X, y)
         super(AbstractUoILinearRegressor, self).fit(X, y, stratify=stratify,
                                                     verbose=verbose)
 
         self._fit_intercept(X_offset, y_offset, X_scale)
         self.coef_ = np.squeeze(self.coef_)
-        
+
         return self
 
     def _fit_intercept_no_features(self, y):
