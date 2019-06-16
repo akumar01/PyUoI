@@ -646,9 +646,9 @@ class AbstractUoILinearRegressor(
         # preprocess data
         # X, y, X_offset, y_offset, X_scale = self.preprocess_data(X, y)
         super(AbstractUoILinearRegressor, self).fit(X, y, stratify=stratify,
-                                                    verbose=verbose) 
+                                                    verbose=verbose)
 
-        self._fit_intercept(X_offset, y_offset, X_scale)
+        # self._fit_intercept(X_offset, y_offset, X_scale)
         self.coef_ = np.squeeze(self.coef_)
 
         return self
