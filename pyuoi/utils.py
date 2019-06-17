@@ -225,6 +225,23 @@ def unbiased_AIC(y_true, y_pred, n_features):
     return AIC
 
 # Manually set model complexity penalty
-def MIC(ll, n_features, penalty):
+def MIC(y, y_pred, k, penalty):
+    n = y.size
 
-    return penalty * n_features - 2 * ll
+    eKLe = n/2 * (np.log(2 * np.pi) + np.log(np.mean((y - y_pred)**2)) + 1)
+    MIC = eKLe + penalty * k
+
+    return MIC
+
+# Calculate the exact risk
+def exact_risk(y, y_pred, k, penalty, sigma):
+
+    n = y.size
+
+    sigma_hat = np.sqrt(np.mean((y - y_pred)**2))
+
+    exact_KL_div = \
+    1/2 * (n * np.log(2 * np.pi * sigma_hat**2) + \
+           n * sigma**2/(sigma_hat**2) + 1/(sigma_hat**2) * np.linalg.norm(y_pred)**2)
+
+    return exact_KL_div

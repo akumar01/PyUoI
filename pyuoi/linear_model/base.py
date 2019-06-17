@@ -370,11 +370,13 @@ class AbstractUoILinearModel(
                     fitter=self.estimation_lm,
                     X=X_rep, y=y_rep,
                     support=support)
+                # Calculate the exact risk of the estimates
                 alt_scores[ii] = self.score_predictions(
-                    metric = self.estimation_score,
+                    metric = 'exact_risk',
                     fitter = self.estimation_lm,
-                    X= X_test, y=y_test,
+                    X= X_rep, y=y_rep,
                     support= support)
+
 
             else:
                 fitter = self._fit_intercept_no_features(y_rep)
@@ -384,9 +386,9 @@ class AbstractUoILinearModel(
                     X=np.zeros_like(X_rep), y=y_rep,
                     support=np.zeros(X_rep.shape[1], dtype=bool))
                 alt_scores[ii] = self.score_predictions(
-                    metric = self.estimation_score,
+                    metric = 'exact_risk',
                     fitter = fitter,
-                    X=np.zeros_like(X_test), y=y_test,
+                    X=np.zeros_like(X_rep), y=y_rep,
                     support=np.zeros(X_test.shape[1], dtype=bool))
 
         if self.comm is not None:
@@ -516,7 +518,7 @@ class AbstractUoILinearRegressor(
                  estimation_frac=0.9, stability_selection=1.,
                  estimation_score='r2', copy_X=True, fit_intercept=True,
                  normalize=True, random_state=None, max_iter=1000,
-                 comm=None, manual_penalty = 2):
+                 comm=None, manual_penalty = 2, noise_level = 0):
         super(AbstractUoILinearRegressor, self).__init__(
             n_boots_sel=n_boots_sel,
             n_boots_est=n_boots_est,
@@ -537,7 +539,7 @@ class AbstractUoILinearRegressor(
 
         self.__estimation_score = estimation_score
         self.manual_penalty = manual_penalty
-
+        self.noise_level = noise_level
     def preprocess_data(self, X, y):
         return _preprocess_data(
             X, y, fit_intercept=self.fit_intercept, normalize=self.normalize,
@@ -607,6 +609,9 @@ class AbstractUoILinearRegressor(
                 score = utils.AICc(ll, n_features, n_samples)
             elif metric == 'MIC':
                 score = utils.MIC(ll, n_features, self.manual_penalty)
+            elif metric == 'exact_risk':
+                score = utils.exact_risk(y, y_pred, n_features, self.manual_penalty,
+                                         np.sqrt(self.noise_level))
             else:
                 raise ValueError(metric + ' is not a valid option.')
             # negate the score since lower information criterion is preferable
