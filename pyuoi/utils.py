@@ -128,6 +128,7 @@ def log_likelihood_glm(model, y_true, y_pred):
     ll : float
         The log-likelihood.
     """
+
     if model == 'normal':
         # this log-likelihood is calculated under the assumption that the
         # variance is the value that maximize the log-likelihood
@@ -226,8 +227,14 @@ def unbiased_AIC(y_true, y_pred, n_features):
 
 # Manually set model complexity penalty
 def MIC(y, y_pred, k, penalty):
+
+    # Don't get caught by surprise about shape mismatches
+    y = y.ravel()
+    y_pred = y_pred.ravel()
+
     n = y.size
 
+    # Use a double summation
     eKLe = n/2 * (np.log(2 * np.pi) + np.log(np.mean((y - y_pred)**2)) + 1)
     MIC = eKLe + penalty * k
 
@@ -238,10 +245,13 @@ def exact_risk(y, y_pred, k, penalty, sigma):
 
     n = y.size
 
+    y = y.ravel()
+    y_pred = y_pred.ravel()
+
     sigma_hat = np.sqrt(np.mean((y - y_pred)**2))
 
     exact_KL_div = \
     1/2 * (n * np.log(2 * np.pi * sigma_hat**2) + \
-           n * sigma**2/(sigma_hat**2) + 1/(sigma_hat**2) * np.linalg.norm(y_pred)**2)
+           n * sigma**2/(sigma_hat**2) + 1/(sigma_hat**2) * np.sum(y_pred**2))
 
     return exact_KL_div
