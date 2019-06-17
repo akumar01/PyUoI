@@ -608,7 +608,7 @@ class AbstractUoILinearRegressor(
             elif metric == 'AICc':
                 score = utils.AICc(ll, n_features, n_samples)
             elif metric == 'MIC':
-                score = utils.MIC(ll, n_features, self.manual_penalty)
+                score = utils.MIC(y, y_pred, n_features, self.manual_penalty)
             elif metric == 'exact_risk':
                 score = utils.exact_risk(y, y_pred, n_features, self.manual_penalty,
                                          np.sqrt(self.noise_level))
