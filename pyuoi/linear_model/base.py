@@ -2,6 +2,8 @@ import abc as _abc
 import six as _six
 import numpy as np
 
+import pdb
+
 from sklearn.linear_model.base import SparseCoefMixin
 from sklearn.metrics import r2_score, accuracy_score, log_loss
 from sklearn.model_selection import train_test_split
@@ -12,7 +14,7 @@ from pyuoi import utils
 from pyuoi.mpi_utils import (Gatherv_rows, Bcast_from_root)
 
 from .utils import stability_selection_to_threshold, intersection
-
+from pyuoi.utils import selection_accuracy
 
 class AbstractUoILinearModel(
         _six.with_metaclass(_abc.ABCMeta, SparseCoefMixin)):
@@ -337,7 +339,11 @@ class AbstractUoILinearModel(
                     random_state=self.random_state)
 
         # score (r2/AIC/AICc/BIC) for each bootstrap for each support
-        scores = np.zeros(tasks.size)
+
+        # MIC modification: Score for each bootstrap for each support
+        # using the range of specified penalties
+
+        scores = np.zeros((tasks.size, len(self.manual_penalty)))
 
         # iterate over bootstrap samples and supports
         for ii, task_idx in enumerate(tasks):
@@ -361,18 +367,22 @@ class AbstractUoILinearModel(
                     self._estimation_lm.fit(X_rep, y_rep, coef_mask=support)
                     estimates[ii] = self._estimation_lm.coef_.ravel()
 
-                scores[ii] = self._score_predictions(
-                    metric=self.estimation_score,
-                    fitter=self._estimation_lm,
-                    X=X_test, y=y_test,
-                    support=support)
+                for mpidx, mp in enumerate(self.manual_penalty):
+                    scores[ii, mpidx] = self._score_predictions(
+                        metric=self.estimation_score,
+                        fitter=self._estimation_lm,
+                        X=X_rep, y=y_rep,
+                        support=support, penalty = mp)
             else:
                 fitter = self._fit_intercept_no_features(y_rep)
-                scores[ii] = self._score_predictions(
-                    metric=self.estimation_score,
-                    fitter=fitter,
-                    X=np.zeros_like(X_test), y=y_test,
-                    support=np.zeros(X_test.shape[1], dtype=bool))
+
+                for mpidx, mp in enumerate(self.manual_penalty):
+                    scores[ii, mpidx] = self._score_predictions(
+                        metric=self.estimation_score,
+                        fitter=fitter,
+                        X=np.zeros_like(X_rep), y=y_rep,
+                        support=np.zeros(X_test.shape[1], dtype=bool),
+                        penalty = mp)
 
         if self.comm is not None:
             estimates = Gatherv_rows(send=estimates, comm=self.comm,
@@ -386,8 +396,29 @@ class AbstractUoILinearModel(
             if rank == 0:
                 estimates = estimates.reshape(self.n_boots_est,
                                               self.n_supports_, n_coef)
-                scores = scores.reshape(self.n_boots_est, self.n_supports_)
-                self.rp_max_idx_ = np.argmax(scores, axis=1)
+                scores = scores.reshape(self.n_boots_est, self.n_supports_, len(self.manual_penalty))
+
+                # To select the rp_max_idx_, we need to first choose the oracle
+                # MIC penalty. To do this, iterate through the possible MIC penalties
+                # and assess the selection accuracy of the resulting estimates. Choose
+                # the oracle penalty that leads to the highest average selection accuracy
+
+                selection_accuracies = np.zeros(len(self.manual_penalty))
+
+                for mpidx, mp in enumerate(self.manual_penalty):
+
+                    candidate_max_idx = np.argmax(scores[..., mpidx], axis = 1)
+                    candidate_estimates = estimates[np.arange(self.n_boots_est),
+                                                    candidate_max_idx]
+
+                    selection_accuracies[mpidx] = np.mean(selection_accuracy(self.true_support.ravel(),
+                                                                      candidate_estimates))
+
+                # penalty index
+                penalty_index = np.argmax(selection_accuracies)
+
+                self.rp_max_idx_ = np.argmax(scores[..., penalty_index], axis=1)
+
                 best_estimates = estimates[np.arange(self.n_boots_est),
                                            self.rp_max_idx_]
                 # take the median across estimates for the final estimate
@@ -404,8 +435,23 @@ class AbstractUoILinearModel(
         else:
             self.estimates_ = estimates.reshape(self.n_boots_est,
                                                 self.n_supports_, n_coef)
-            self.scores_ = scores.reshape(self.n_boots_est, self.n_supports_)
-            self.rp_max_idx_ = np.argmax(self.scores_, axis=1)
+            self.scores_ = scores.reshape(self.n_boots_est, self.n_supports_, len(self.manual_penalty))
+            selection_accuracies = np.zeros(len(self.manual_penalty))
+            pdb.set_trace()
+
+            for mpidx, mp in enumerate(self.manual_penalty):
+
+                candidate_max_idx = np.argmax(self.scores_[..., mpidx], axis = 1)
+                candidate_estimates = self.estimates_[np.arange(self.n_boots_est),
+                                                candidate_max_idx, :]
+
+                selection_accuracies[mpidx] = np.mean(selection_accuracy(self.true_support.ravel(),
+                                                                  candidate_estimates))
+            # penalty index
+            penalty_index = np.argmax(selection_accuracies)
+
+            self.rp_max_idx_ = np.argmax(self.scores_[..., penalty_index], axis=1)
+
             # extract the estimates over bootstraps from model with best
             # regularization parameter value
             best_estimates = self.estimates_[np.arange(self.n_boots_est),
@@ -469,7 +515,7 @@ class AbstractUoILinearRegressor(
     """An abstract base class for UoI linear regression classes.
     """
 
-    _valid_estimation_metrics = ('r2', 'AIC', 'AICc', 'BIC')
+    _valid_estimation_metrics = ('r2', 'AIC', 'AICc', 'BIC', 'MIC')
 
     def __init__(self, n_boots_sel=48, n_boots_est=48, selection_frac=0.9,
                  estimation_frac=0.9, stability_selection=1.,
@@ -528,7 +574,7 @@ class AbstractUoILinearRegressor(
     def estimation_score(self):
         return self.__estimation_score
 
-    def _score_predictions(self, metric, fitter, X, y, support):
+    def _score_predictions(self, metric, fitter, X, y, support, penalty = None):
         """Score, according to some metric, predictions provided by a model.
 
         the resulting score will be negated if an information criterion is
@@ -571,6 +617,8 @@ class AbstractUoILinearRegressor(
                 score = utils.AIC(ll, n_features)
             elif metric == 'AICc':
                 score = utils.AICc(ll, n_features, n_samples)
+            elif metric == 'MIC':
+                score = utils.MIC(ll, n_features, penalty)
             else:
                 raise ValueError(metric + ' is not a valid option.')
             # negate the score since lower information criterion is preferable
