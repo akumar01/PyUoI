@@ -318,6 +318,7 @@ class AbstractUoILinearModel(
         my_boots = dict((task_idx // self.n_supports_, None)
                         for task_idx in tasks)
         estimates = np.zeros((tasks.size, n_coef))
+        intercepts = np.zeros(tasks.size)
 
         for boot in range(self.n_boots_est):
             if self.comm is not None:
@@ -361,9 +362,11 @@ class AbstractUoILinearModel(
                     self.estimation_lm.fit(X_rep[:, support], y_rep)
                     estimates[ii, np.tile(support, n_tile)] = \
                         self.estimation_lm.coef_.ravel()
+                    intercepts[ii] = self.estimation_lm.intercept_
                 else:
                     self.estimation_lm.fit(X_rep, y_rep, coef_mask=support)
                     estimates[ii] = self.estimation_lm.coef_.ravel()
+                    intercepts[ii] = self.estimation_lm.intercept_
 
                 scores[ii] = self.score_predictions(
                     metric=self.estimation_score,
@@ -394,6 +397,8 @@ class AbstractUoILinearModel(
         if self.comm is not None:
             estimates = Gatherv_rows(send=estimates, comm=self.comm,
                                      root=0)
+            intercepts = Gatherv_rows(send = intercepts, comm = self.comm,
+                                      root = 0)
             scores = Gatherv_rows(send=scores, comm=self.comm,
                                   root=0)
             alt_scores = Gatherv_rows(send=alt_scores, comm=self.comm,
@@ -411,6 +416,7 @@ class AbstractUoILinearModel(
             if rank == 0:
                 estimates = estimates.reshape(self.n_boots_est,
                                               self.n_supports_, n_coef)
+                intercepts = intercepts.reshape(self.n_boots_est, self.n_supports_)
                 scores = scores.reshape(self.n_boots_est, self.n_supports_)
                 alt_scores = alt_scores.reshape(self.n_boots_est, self.n_supports_)
 
@@ -427,6 +433,7 @@ class AbstractUoILinearModel(
                 alt_coef = np.median(alt_estimates, axis = 0).reshape(n_tile,
                                                                       n_features)
             self.estimates_ = Bcast_from_root(estimates, self.comm, root=0)
+            self.intercepts_ = Bcast_from_root(intercepts, self.comm, root = 0)
             self.alt_estimates_ = Bcast_from_root(alt_estimates, self.comm, root = 0)
 
             self.scores_ = Bcast_from_root(scores, self.comm, root=0)
@@ -440,6 +447,7 @@ class AbstractUoILinearModel(
         else:
             self.estimates_ = estimates.reshape(self.n_boots_est,
                                                 self.n_supports_, n_coef)
+            self.intercepts_ = intercepts.reshape(self.n_boots_est, self.n_supports_)
             self.scores_ = scores.reshape(self.n_boots_est, self.n_supports_)
             self.alt_scores_ = alt_scores.reshape(self.n_boots_est, self.n_supports_)
 
