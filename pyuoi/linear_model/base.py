@@ -417,6 +417,8 @@ class AbstractUoILinearModel(
                 # penalty index
                 penalty_index = np.argmax(selection_accuracies)
 
+                self.penalty_ = self.manual_penalty(penalty_index)
+
                 self.rp_max_idx_ = np.argmax(scores[..., penalty_index], axis=1)
 
                 best_estimates = estimates[np.arange(self.n_boots_est),
@@ -449,6 +451,8 @@ class AbstractUoILinearModel(
                                                                   candidate_estimates))
             # penalty index
             penalty_index = np.argmax(selection_accuracies)
+
+            self.penalty_ = self.manual_penalty(penalty_index)
 
             self.rp_max_idx_ = np.argmax(self.scores_[..., penalty_index], axis=1)
 
