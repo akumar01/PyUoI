@@ -255,3 +255,38 @@ def exact_risk(y, y_pred, k, penalty, sigma):
            n * sigma**2/(sigma_hat**2) + 1/(sigma_hat**2) * np.sum(y_pred**2))
 
     return exact_KL_div
+
+
+def selection_accuracy(beta, beta_hat, threshold = False):
+
+    beta, beta_hat = tile_beta(beta, beta_hat)
+
+    if threshold:
+        beta_hat[beta_hat < 1e-6] = 0
+
+    selection_accuracy = np.zeros(beta_hat.shape[0])
+    for i in range(beta_hat.shape[0]):
+        b = beta[i, :].squeeze()
+        bhat = beta_hat[i, :].squeeze()
+
+        # Define support sets in1 terms of indices
+        Sb = set(np.nonzero(b)[0].tolist())
+        Sbhat = set(np.nonzero(bhat)[0].tolist())
+
+        selection_accuracy[i] = 1 - \
+        float(len((Sb.difference(Sbhat)).union(Sbhat.difference(Sb))))\
+        /float((len(Sb) + len(Sbhat)))
+    return selection_accuracy
+
+def tile_beta(beta, beta_hat):
+
+    if np.ndim(beta_hat) == 1:
+        beta_hat = beta_hat[np.newaxis, :]
+
+    if np.ndim(beta) == 1:
+        beta = beta[np.newaxis, :]
+
+    if beta.shape != beta_hat.shape:
+        beta = np.tile(beta, [int(beta_hat.shape[0]/beta.shape[0]), 1])
+
+    return beta, beta_hat

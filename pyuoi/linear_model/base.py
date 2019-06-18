@@ -11,6 +11,7 @@ from pyuoi import utils
 from pyuoi.mpi_utils import (Gatherv_rows, Bcast_from_root)
 
 from .utils import stability_selection_to_threshold, intersection
+from pyuoi.utils import selection_accuracy
 
 
 class AbstractUoILinearModel(
@@ -341,7 +342,11 @@ class AbstractUoILinearModel(
                     random_state=self.random_state)
 
         # score (r2/AIC/AICc/BIC) for each bootstrap for each support
-        scores = np.zeros(tasks.size)
+
+        # MIC modification: Score for each bootstrap for each support using the
+        # range of specified penalties
+
+        scores = np.zeros((tasks.size, len(self.manual_penalty)))
         alt_scores = np.zeros(tasks.size)
         n_tile = n_coef // n_features
         # iterate over bootstrap samples and supports
@@ -368,11 +373,12 @@ class AbstractUoILinearModel(
                     estimates[ii] = self.estimation_lm.coef_.ravel()
                     intercepts[ii] = self.estimation_lm.intercept_
 
-                scores[ii] = self.score_predictions(
-                    metric=self.estimation_score,
-                    fitter=self.estimation_lm,
-                    X=X_rep, y=y_rep,
-                    support=support)
+                for mpidx, mp in enumerate(self.manual_penalty):
+                    scores[ii, mpidx] = self.score_predictions(
+                        metric=self.estimation_score,
+                        fitter=self.estimation_lm,
+                        X=X_rep, y=y_rep,
+                        support=support, penalty = mp)
                 # Calculate the exact risk of the estimates
                 alt_scores[ii] = self.score_predictions(
                     metric = 'exact_risk',
@@ -383,11 +389,13 @@ class AbstractUoILinearModel(
 
             else:
                 fitter = self._fit_intercept_no_features(y_rep)
-                scores[ii] = self.score_predictions(
-                    metric=self.estimation_score,
-                    fitter=fitter,
-                    X=np.zeros_like(X_rep), y=y_rep,
-                    support=np.zeros(X_rep.shape[1], dtype=bool))
+                for mpidx, mp in enumerate(self.manual_penalty):
+                    scores[ii, mpidx] = self.score_predictions(
+                        metric=self.estimation_score,
+                        fitter=fitter,
+                        X=np.zeros_like(X_rep), y=y_rep,
+                        support=np.zeros(X_rep.shape[1], dtype=bool),
+                        penalty = mp)
                 alt_scores[ii] = self.score_predictions(
                     metric = 'exact_risk',
                     fitter = fitter,
@@ -413,14 +421,36 @@ class AbstractUoILinearModel(
             coef = None
             alt_coef = None
 
+
             if rank == 0:
                 estimates = estimates.reshape(self.n_boots_est,
                                               self.n_supports_, n_coef)
                 intercepts = intercepts.reshape(self.n_boots_est, self.n_supports_)
-                scores = scores.reshape(self.n_boots_est, self.n_supports_)
+                scores = scores.reshape(self.n_boots_est, self.n_supports_, len(self.manual_penalty))
                 alt_scores = alt_scores.reshape(self.n_boots_est, self.n_supports_)
 
-                self.rp_max_idx_ = np.argmax(scores, axis=1)
+
+                # To select the rp_max_idx_, we need to first choose the oracle
+                # MIC penalty. To do this, iterate through the possible MIC penalties
+                # and assess the selection accuracy of the resulting estimates. Choose
+                # the oracle penalty that leads to the highest average selection accuracy
+
+                selection_accuracies = np.zeros(len(self.manual_penalty))
+
+                for mpidx, mp in enumerate(self.manual_penalty):
+
+                    candidate_max_idx = np.argmax(scores[..., mpidx], axis = 1)
+                    candidate_estimates = estimates[np.arange(self.n_boots_est),
+                                                    candidate_max_idx]
+
+                    selection_accuracies[mpidx] = np.mean(selection_accuracy(self.true_support.ravel(),
+                                                                      candidate_estimates))
+
+                # penalty index
+                penalty_index = np.argmax(selection_accuracies)
+
+                self.rp_max_idx_ = np.argmax(scores[..., penalty_index], axis=1)
+
                 self.alt_rp_max_idx_ = np.argmax(alt_scores, axis = 1)
                 best_estimates = estimates[np.arange(self.n_boots_est),
                                            self.rp_max_idx_]
@@ -448,12 +478,29 @@ class AbstractUoILinearModel(
             self.estimates_ = estimates.reshape(self.n_boots_est,
                                                 self.n_supports_, n_coef)
             self.intercepts_ = intercepts.reshape(self.n_boots_est, self.n_supports_)
-            self.scores_ = scores.reshape(self.n_boots_est, self.n_supports_)
+            self.scores_ = scores.reshape(self.n_boots_est, self.n_supports_, len(self.manual_penalty))
             self.alt_scores_ = alt_scores.reshape(self.n_boots_est, self.n_supports_)
+            # To select the rp_max_idx_, we need to first choose the oracle
+            # MIC penalty. To do this, iterate through the possible MIC penalties
+            # and assess the selection accuracy of the resulting estimates. Choose
+            # the oracle penalty that leads to the highest average selection accuracy
 
-            self.rp_max_idx_ = np.argmax(self.scores_, axis=1)
+            selection_accuracies = np.zeros(len(self.manual_penalty))
+
+            for mpidx, mp in enumerate(self.manual_penalty):
+
+                candidate_max_idx = np.argmax(self.scores_[..., mpidx], axis = 1)
+                candidate_estimates = self.estimates_[np.arange(self.n_boots_est),
+                                                candidate_max_idx, :]
+
+                selection_accuracies[mpidx] = np.mean(selection_accuracy(self.true_support.ravel(),
+                                                                  candidate_estimates))
+
+            # penalty index
+            penalty_index = np.argmax(selection_accuracies)
+
+            self.rp_max_idx_ = np.argmax(self.scores_[..., penalty_index], axis=1)
             self.alt_rp_max_idx_ = np.argmax(self.alt_scores_, axis = 1)
-
 
             # extract the estimates over bootstraps from model with best
             # regularization parameter value
@@ -526,7 +573,7 @@ class AbstractUoILinearRegressor(
                  estimation_frac=0.9, stability_selection=1.,
                  estimation_score='r2', copy_X=True, fit_intercept=True,
                  normalize=True, random_state=None, max_iter=1000,
-                 comm=None, manual_penalty = 2, noise_level = 0):
+                 comm=None, manual_penalty = [1], true_support = None):
         super(AbstractUoILinearRegressor, self).__init__(
             n_boots_sel=n_boots_sel,
             n_boots_est=n_boots_est,
@@ -547,7 +594,10 @@ class AbstractUoILinearRegressor(
 
         self.__estimation_score = estimation_score
         self.manual_penalty = manual_penalty
-        self.noise_level = noise_level
+
+        # Keep track of the true model support for choosing oracle MIC
+        self.true_support = true_support
+
     def preprocess_data(self, X, y):
         return _preprocess_data(
             X, y, fit_intercept=self.fit_intercept, normalize=self.normalize,
@@ -569,7 +619,7 @@ class AbstractUoILinearRegressor(
     def estimation_score(self):
         return self.__estimation_score
 
-    def score_predictions(self, metric, fitter, X, y, support):
+    def score_predictions(self, metric, fitter, X, y, support, penalty = None):
         """Score, according to some metric, predictions provided by a model.
 
         the resulting score will be negated if an information criterion is
@@ -594,36 +644,22 @@ class AbstractUoILinearRegressor(
 
         Returns
         -------
-        score : float
             The score.
+        score : float
         """
         y_pred = fitter.predict(X[:, support])
-        if metric == 'r2':
-            score = r2_score(y, y_pred)
-        elif metric == 'unbiased_AIC':
-            n_features = np.count_nonzero(support)
-            score = -1 * utils.unbiased_AIC(y, y_pred, n_features)
+        n_features = np.count_nonzero(support)
+        if metric == 'MIC':
+            score = utils.MIC(y, y_pred, n_features, penalty)
+        elif metric == 'exact_risk':
+            score = utils.exact_risk(y, y_pred, n_features, self.manual_penalty,
+                                     np.sqrt(1))
         else:
-            ll = utils.log_likelihood_glm(model='normal',
-                                          y_true=y,
-                                          y_pred=y_pred)
-            n_features = np.count_nonzero(support)
-            n_samples = y.size
-            if metric == 'BIC':
-                score = utils.BIC(ll, n_features, n_samples)
-            elif metric == 'AIC':
-                score = utils.AIC(ll, n_features)
-            elif metric == 'AICc':
-                score = utils.AICc(ll, n_features, n_samples)
-            elif metric == 'MIC':
-                score = utils.MIC(y, y_pred, n_features, self.manual_penalty)
-            elif metric == 'exact_risk':
-                score = utils.exact_risk(y, y_pred, n_features, self.manual_penalty,
-                                         np.sqrt(self.noise_level))
-            else:
-                raise ValueError(metric + ' is not a valid option.')
-            # negate the score since lower information criterion is preferable
-            score = -score
+            raise ValueError(metric + ' is not a valid option.')
+
+        # negate the score since lower information criterion is preferable
+
+        score = -score
         return score
 
     def fit(self, X, y, stratify=None, verbose=False):
