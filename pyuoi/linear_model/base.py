@@ -371,7 +371,7 @@ class AbstractUoILinearModel(
                     scores[ii, mpidx] = self._score_predictions(
                         metric=self.estimation_score,
                         fitter=self._estimation_lm,
-                        X=X_rep, y=y_rep,
+                        X=X_test, y=y_test,
                         support=support, penalty = mp)
             else:
                 fitter = self._fit_intercept_no_features(y_rep)
@@ -380,7 +380,7 @@ class AbstractUoILinearModel(
                     scores[ii, mpidx] = self._score_predictions(
                         metric=self.estimation_score,
                         fitter=fitter,
-                        X=np.zeros_like(X_rep), y=y_rep,
+                        X=np.zeros_like(X_test), y=y_test,
                         support=np.zeros(X_test.shape[1], dtype=bool),
                         penalty = mp)
 
@@ -417,7 +417,7 @@ class AbstractUoILinearModel(
                 # penalty index
                 penalty_index = np.argmax(selection_accuracies)
 
-                self.penalty_ = self.manual_penalty(penalty_index)
+                self.penalty_ = self.manual_penalty[penalty_index]
 
                 self.rp_max_idx_ = np.argmax(scores[..., penalty_index], axis=1)
 
@@ -439,7 +439,7 @@ class AbstractUoILinearModel(
                                                 self.n_supports_, n_coef)
             self.scores_ = scores.reshape(self.n_boots_est, self.n_supports_, len(self.manual_penalty))
             selection_accuracies = np.zeros(len(self.manual_penalty))
-            pdb.set_trace()
+           
 
             for mpidx, mp in enumerate(self.manual_penalty):
 
@@ -452,7 +452,7 @@ class AbstractUoILinearModel(
             # penalty index
             penalty_index = np.argmax(selection_accuracies)
 
-            self.penalty_ = self.manual_penalty(penalty_index)
+            self.penalty_ = self.manual_penalty[penalty_index]
 
             self.rp_max_idx_ = np.argmax(self.scores_[..., penalty_index], axis=1)
 
