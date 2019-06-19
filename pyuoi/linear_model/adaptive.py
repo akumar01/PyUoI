@@ -1,11 +1,26 @@
 import numpy as np
+from utils import log_likelihood_glm, MIC
+    
+### MAKE SURE TO CHECK THAT INTERCEPTS ARE NEGLIGIBLE THROUGHOUT
 
+# Attempt 1: Shouldn't the GDF of OLS just be the number of 
+# features? This makes the whole procedure very straightforward
+def naive_adaptive_penalty(X, y, estimates, support_idxs, supports, lambdas):
 
-# Penalized log likelihood
-def pen_logll(y, y_pred, penalty)
-	
+    # Perform a minimization over lambda
+    estimator_losses = np.zeros(lambdas.size)
+
+    for i, l in enumerate(lambdas):
+
+        y_pred = X @ estimates[support_idxs[i], :]
+        gdf = np.count_nonzero(estimates[support_idxs[i], :])
+        estimator_losses[i] = gdf - log_likelihood_glm('normal', y, y_pred)
+
+    lambda_hat = lambdas[np.argmin(estimatior_losses)]
+    return lambda_hat
+
 # calculate the adaptive mdoel penalty 
-def calc_adaptive_penalty():
+def calc_adaptive_penalty(P, supports, X, y):
 
 	# First step: Over the range of lambda values considered, and the set of 
 	# models, calculate the 
@@ -14,8 +29,15 @@ def calc_adaptive_penalty():
 
 	n_models, n_features, n_samples = P.shape
 
-    # Number of perturbation to use for sensitivity estimation
-    T = n_samples
+    # Let sigma be known and fixed for now:
+    sigma_squared = 1
+
+    # Peturbation strength
+    tau = 0.5 * np.sqrt(sigma_squared)
+
+    Lambda = np.linspace(0, 2 * np.log(n_samples), 40)
+
+    M_hat = np.zeros((Lambda.size, n_features))
 
 
 

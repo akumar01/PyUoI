@@ -317,7 +317,8 @@ class AbstractUoILinearModel(
         my_boots = dict((task_idx // self.n_supports_, None)
                         for task_idx in tasks)
         estimates = np.zeros((tasks.size, n_coef))
-
+        # Keep track of intercepts as well, for now
+        intercepts = np.zeros(tasks.size)
         for boot in range(self.n_boots_est):
             if self.comm is not None:
                 if rank == 0:
@@ -366,12 +367,12 @@ class AbstractUoILinearModel(
                 else:
                     self._estimation_lm.fit(X_rep, y_rep, coef_mask=support)
                     estimates[ii] = self._estimation_lm.coef_.ravel()
-
+                    intercepts[ii] = self._estiamtion_lm.intercept_
                 for mpidx, mp in enumerate(self.manual_penalty):
                     scores[ii, mpidx] = self._score_predictions(
                         metric=self.estimation_score,
                         fitter=self._estimation_lm,
-                        X=X_test, y=y_test,
+                        X=X_rep, y=y_rep,
                         support=support, penalty = mp)
             else:
                 fitter = self._fit_intercept_no_features(y_rep)
@@ -380,13 +381,16 @@ class AbstractUoILinearModel(
                     scores[ii, mpidx] = self._score_predictions(
                         metric=self.estimation_score,
                         fitter=fitter,
-                        X=np.zeros_like(X_test), y=y_test,
-                        support=np.zeros(X_test.shape[1], dtype=bool),
+                        X=np.zeros_like(X_rep), y=y_rep,
+                        support=np.zeros(X_rep.shape[1], dtype=bool),
                         penalty = mp)
+
 
         if self.comm is not None:
             estimates = Gatherv_rows(send=estimates, comm=self.comm,
                                      root=0)
+            intercepts = Gatherv_rows(send=intercepts, comm = self.comm, 
+                                      root=0)
             scores = Gatherv_rows(send=scores, comm=self.comm,
                                   root=0)
             self.rp_max_idx_ = None
@@ -410,9 +414,9 @@ class AbstractUoILinearModel(
                     candidate_max_idx = np.argmax(scores[..., mpidx], axis = 1)
                     candidate_estimates = estimates[np.arange(self.n_boots_est),
                                                     candidate_max_idx]
-
-                    selection_accuracies[mpidx] = np.mean(selection_accuracy(self.true_support.ravel(),
-                                                                      candidate_estimates))
+                    if self.true_support is not None:
+                        selection_accuracies[mpidx] = np.mean(selection_accuracy(self.true_support.ravel(),
+                                                                          candidate_estimates))
 
                 # penalty index
                 penalty_index = np.argmax(selection_accuracies)
@@ -437,24 +441,47 @@ class AbstractUoILinearModel(
         else:
             self.estimates_ = estimates.reshape(self.n_boots_est,
                                                 self.n_supports_, n_coef)
+            self.intercepts_ = intercepts.reshape(self.n_boots_est, self.n_supports_)
             self.scores_ = scores.reshape(self.n_boots_est, self.n_supports_, len(self.manual_penalty))
             selection_accuracies = np.zeros(len(self.manual_penalty))
            
+           candidate_max_idx = np.zeros((self.n_boots_est, len(self.manual_penalty)))
 
             for mpidx, mp in enumerate(self.manual_penalty):
 
-                candidate_max_idx = np.argmax(self.scores_[..., mpidx], axis = 1)
+                candidate_max_idx[:, mpidx] = np.argmax(self.scores_[..., mpidx], axis = 1)
                 candidate_estimates = self.estimates_[np.arange(self.n_boots_est),
-                                                candidate_max_idx, :]
+                                                 candidate_max_idx[:, mpidx], :]
+                if self.true_support is not None:
+                    selection_accuracies[mpidx] = np.mean(selection_accuracy(self.true_support.ravel(),
+                                                                      candidate_estimates))
+            # Adaptive selection: At this point, use the estimates and 
+            # the calculated scores to determine the adaptive penalty
 
-                selection_accuracies[mpidx] = np.mean(selection_accuracy(self.true_support.ravel(),
-                                                                  candidate_estimates))
-            # penalty index
-            penalty_index = np.argmax(selection_accuracies)
+            # Do a separate calculation across each bootstrap
+    
+            self.penalty_ = np.zeros(self.n_boots_est)
 
-            self.penalty_ = self.manual_penalty[penalty_index]
+            for boot in range(self.n_boots_est):
 
-            self.rp_max_idx_ = np.argmax(self.scores_[..., penalty_index], axis=1)
+                self.penalty_[boot] = adaptive.naive_penalty(y_rep[my_boots[boot][0]], 
+                                                             self.estimates_[boot,...], 
+                                                             candidate_max_idx[boot,...], 
+                                                             self.supports_,
+                                                             self.manual_penalty)
+ 
+            # Do a second round of scoring, this time using the adaptive penalty for
+            # each bootstrap
+            adaptive_scores = np.zeros((self.n_boots_est, self.n_supports_))
+            for i in range(self.n_boots_est):
+                for j in range(self.n_supports_):
+                    adaptive_scores[i] = self.score_predictions(fitter, X, y, support, penalty = self.ma)
+
+
+            self.rp_max_idx_ = adaptive.select_models(self.estimates_, self.estimates_)
+#            self.penalty_ = self.manual_penalty[penalty_index]
+            
+#            self.rp_max_idx_ = np.argmax(self.scores_[..., penalty_index], axis=1)
 
             # extract the estimates over bootstraps from model with best
             # regularization parameter value
