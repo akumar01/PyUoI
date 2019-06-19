@@ -4,6 +4,8 @@ import numpy as np
 
 import pdb
 
+from . import adaptive
+
 from sklearn.linear_model.base import SparseCoefMixin
 from sklearn.metrics import r2_score, accuracy_score, log_loss
 from sklearn.model_selection import train_test_split
@@ -15,6 +17,7 @@ from pyuoi.mpi_utils import (Gatherv_rows, Bcast_from_root)
 
 from .utils import stability_selection_to_threshold, intersection
 from pyuoi.utils import selection_accuracy
+
 
 class AbstractUoILinearModel(
         _six.with_metaclass(_abc.ABCMeta, SparseCoefMixin)):
@@ -448,16 +451,22 @@ class AbstractUoILinearModel(
             self.scores_ = scores.reshape(self.n_boots_est, self.n_supports_, len(self.manual_penalty))
             selection_accuracies = np.zeros(len(self.manual_penalty))
            
-           candidate_max_idx = np.zeros((self.n_boots_est, len(self.manual_penalty)))
+            candidate_max_idx = np.zeros((self.n_boots_est, len(self.manual_penalty)), dtype = int)
 
             for mpidx, mp in enumerate(self.manual_penalty):
 
                 candidate_max_idx[:, mpidx] = np.argmax(self.scores_[..., mpidx], axis = 1)
                 candidate_estimates = self.estimates_[np.arange(self.n_boots_est),
-                                                 candidate_max_idx[:, mpidx], :]
+                                  candidate_max_idx[:, mpidx], :]
                 if self.true_support is not None:
                     selection_accuracies[mpidx] = np.mean(selection_accuracy(self.true_support.ravel(),
                                                                       candidate_estimates))
+            # Oracle penalty
+            if self.true_support is not None:
+                self.oracle_penalty_ = self.manual_penalty[np.argmax(selection_accuracies)]
+            else:
+                self.oracle_penalty_ = np.nan
+
             # Adaptive selection: At this point, use the estimates and 
             # the calculated scores to determine the adaptive penalty
 
@@ -466,13 +475,12 @@ class AbstractUoILinearModel(
             self.penalty_ = np.zeros(self.n_boots_est)
 
             for boot in range(self.n_boots_est):
-
-                self.penalty_[boot] = adaptive.naive_penalty(y_rep[my_boots[boot][0]], 
+                self.penalty_[boot] = adaptive.naive_adaptive_penalty(X[my_boots[boot][0], :],
+                                                             y[my_boots[boot][0]], 
                                                              self.estimates_[boot,...], 
                                                              candidate_max_idx[boot,...], 
                                                              self.supports_,
                                                              self.manual_penalty)
- 
             # Do a second round of scoring, this time using the adaptive penalty for
             # each bootstrap
             adaptive_scores = np.zeros((self.n_boots_est, self.n_supports_))
@@ -480,7 +488,7 @@ class AbstractUoILinearModel(
                 for j in range(self.n_supports_):
                     y_pred = X[my_boots[i][0], :] @ self.estimates_[i, j, :] + \
                              self.intercepts_[i, j]
-                    k = self.count_nonzero(self.estimates_[i, j, :])
+                    k = np.count_nonzero(self.estimates_[i, j, :])
                     adaptive_scores[i, j] = adaptive.score_predictions(
                                             y, y_pred, k, self.penalty_[i])
 

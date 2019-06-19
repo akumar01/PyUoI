@@ -1,12 +1,12 @@
 import numpy as np
-from utils import log_likelihood_glm, MIC
+from pyuoi.utils import log_likelihood_glm, MIC
     
 ### MAKE SURE TO CHECK THAT INTERCEPTS ARE NEGLIGIBLE THROUGHOUT
 
 def score_predictions(y, y_pred, n_features, penalty):
-	ll = log_likelihood_glm('normal', y, y_pred)
-	score = MIC(ll, k, n_features, penalty)
-	return score
+    ll = log_likelihood_glm('normal', y, y_pred)
+    score = MIC(ll, n_features, penalty)
+    return score
 
 # Attempt 1: Shouldn't the GDF of OLS just be the number of 
 # features? This makes the whole procedure very straightforward
@@ -21,18 +21,18 @@ def naive_adaptive_penalty(X, y, estimates, support_idxs, supports, lambdas):
         gdf = np.count_nonzero(estimates[support_idxs[i], :])
         estimator_losses[i] = gdf - log_likelihood_glm('normal', y, y_pred)
 
-    lambda_hat = lambdas[np.argmin(estimatior_losses)]
+    lambda_hat = lambdas[np.argmin(estimator_losses)]
     return lambda_hat
 
 # calculate the adaptive mdoel penalty 
 def calc_adaptive_penalty(P, supports, X, y):
 
-	# First step: Over the range of lambda values considered, and the set of 
-	# models, calculate the 
+    # First step: Over the range of lambda values considered, and the set of 
+    # models, calculate the 
 
-	y = y.ravel()
+    y = y.ravel()
 
-	n_models, n_features, n_samples = P.shape
+    n_models, n_features, n_samples = P.shape
 
     # Let sigma be known and fixed for now:
     sigma_squared = 1
