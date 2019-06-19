@@ -3,6 +3,11 @@ from utils import log_likelihood_glm, MIC
     
 ### MAKE SURE TO CHECK THAT INTERCEPTS ARE NEGLIGIBLE THROUGHOUT
 
+def score_predictions(y, y_pred, n_features, penalty):
+	ll = log_likelihood_glm('normal', y, y_pred)
+	score = MIC(ll, k, n_features, penalty)
+	return score
+
 # Attempt 1: Shouldn't the GDF of OLS just be the number of 
 # features? This makes the whole procedure very straightforward
 def naive_adaptive_penalty(X, y, estimates, support_idxs, supports, lambdas):
@@ -38,8 +43,6 @@ def calc_adaptive_penalty(P, supports, X, y):
     Lambda = np.linspace(0, 2 * np.log(n_samples), 40)
 
     M_hat = np.zeros((Lambda.size, n_features))
-
-
 
 def adaptive_estimation_penalty(P, supports, X, y):
 

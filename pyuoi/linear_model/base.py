@@ -400,6 +400,8 @@ class AbstractUoILinearModel(
             if rank == 0:
                 estimates = estimates.reshape(self.n_boots_est,
                                               self.n_supports_, n_coef)
+                intercepts = intercepts.reshape(self.n_boots_est, 
+                                                self.n_supports)
                 scores = scores.reshape(self.n_boots_est, self.n_supports_, len(self.manual_penalty))
 
                 # To select the rp_max_idx_, we need to first choose the oracle
@@ -433,6 +435,7 @@ class AbstractUoILinearModel(
                 self.coef_ = coef
                 self._fit_intercept(X, y)
             self.estimates_ = Bcast_from_root(estimates, self.comm, root=0)
+            self.intercepts_ = Bcast_from_roots(intercepts, self.comm, root=0)
             self.scores_ = Bcast_from_root(scores, self.comm, root=0)
             self.coef_ = Bcast_from_root(coef, self.comm, root=0)
             self.intercept_ = Bcast_from_root(self.intercept_,
@@ -475,10 +478,13 @@ class AbstractUoILinearModel(
             adaptive_scores = np.zeros((self.n_boots_est, self.n_supports_))
             for i in range(self.n_boots_est):
                 for j in range(self.n_supports_):
-                    adaptive_scores[i] = self.score_predictions(fitter, X, y, support, penalty = self.ma)
+                    y_pred = X[my_boots[i][0], :] @ self.estimates_[i, j, :] + \
+                             self.intercepts_[i, j]
+                    k = self.count_nonzero(self.estimates_[i, j, :])
+                    adaptive_scores[i, j] = adaptive.score_predictions(
+                                            y, y_pred, k, self.penalty_[i])
 
-
-            self.rp_max_idx_ = adaptive.select_models(self.estimates_, self.estimates_)
+            self.rp_max_idx_ = np.argmax(adaptive_scores, axis = 1)
 #            self.penalty_ = self.manual_penalty[penalty_index]
             
 #            self.rp_max_idx_ = np.argmax(self.scores_[..., penalty_index], axis=1)
