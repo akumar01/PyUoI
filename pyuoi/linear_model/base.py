@@ -207,6 +207,7 @@ class AbstractUoILinearModel(
                          y_numeric=True, multi_output=True)
 
         # extract model dimensions
+        n_samples = X.shape[0]
         n_features = X.shape[1]
 
         n_coef = self.get_n_coef(X, y)
@@ -360,6 +361,7 @@ class AbstractUoILinearModel(
             X_test = X[idxs_test]
             y_rep = y[idxs_train]
             y_test = y[idxs_test]
+
             if np.any(support):
 
                 # compute the estimate and store the fitted coefficients
@@ -367,10 +369,15 @@ class AbstractUoILinearModel(
                     self._estimation_lm.fit(X_rep[:, support], y_rep)
                     estimates[ii, np.tile(support, self.output_dim)] = \
                         self._estimation_lm.coef_.ravel()
+                    intercepts[ii] = self._estimation_lm.intercept_
+
+
+
                 else:
                     self._estimation_lm.fit(X_rep, y_rep, coef_mask=support)
                     estimates[ii] = self._estimation_lm.coef_.ravel()
                     intercepts[ii] = self._estiamtion_lm.intercept_
+
                 for mpidx, mp in enumerate(self.manual_penalty):
                     scores[ii, mpidx] = self._score_predictions(
                         metric=self.estimation_score,
@@ -464,9 +471,11 @@ class AbstractUoILinearModel(
             # Oracle penalty
             if self.true_support is not None:
                 self.oracle_penalty_ = self.manual_penalty[np.argmax(selection_accuracies)]
+                # How good could we have possibly done given the selection module?
+                self.oracle_sa_ = np.max(selection_accuracy(self.true_support.ravel(), self.supports_))
             else:
                 self.oracle_penalty_ = np.nan
-
+                self.oracle_sa_ = np.nan
             # Adaptive selection: At this point, use the estimates and 
             # the calculated scores to determine the adaptive penalty
 
@@ -490,9 +499,17 @@ class AbstractUoILinearModel(
                              self.intercepts_[i, j]
                     k = np.count_nonzero(self.estimates_[i, j, :])
                     adaptive_scores[i, j] = adaptive.score_predictions(
-                                            y, y_pred, k, np.max(self.penalty_[i]))
+                                            y[my_boots[i][0]], y_pred, k,
+                                            self.penalty_[i])
 
             self.rp_max_idx_ = np.argmax(adaptive_scores, axis = 1)
+
+            # BIC estimates
+            BIC_penalty_idx = np.argmin(np.abs(self.manual_penalty - np.log(n_samples)))
+
+            BIC_rp_max_idx_ = np.argmax(self.scores_[..., BIC_penalty_idx], axis = 1)
+            BIC_estimates = self.estimates_[np.arange(self.n_boots_est), BIC_rp_max_idx_, :]
+            self.BIC_coef_ = np.median(BIC_estimates, axis = 0).reshape(self.output_dim, n_features)
 
 #            self.penalty_ = self.manual_penalty[penalty_index]
             

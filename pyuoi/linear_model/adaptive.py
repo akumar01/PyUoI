@@ -1,12 +1,15 @@
 import numpy as np
 from pyuoi.utils import log_likelihood_glm, MIC
     
-### MAKE SURE TO CHECK THAT INTERCEPTS ARE NEGLIGIBLE THROUGHOUT
-
 def score_predictions(y, y_pred, n_features, penalty):
+    
+    # Don't get burned!
+    y = y.ravel()
+    y_pred = y_pred.ravel()
+
     ll = log_likelihood_glm('normal', y, y_pred)
     score = MIC(ll, n_features, penalty)
-    return score
+    return -1*score
 
 # Attempt 1: Shouldn't the GDF of OLS just be the number of 
 # features? This makes the whole procedure very straightforward
