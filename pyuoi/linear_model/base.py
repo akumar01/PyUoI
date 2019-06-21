@@ -490,9 +490,10 @@ class AbstractUoILinearModel(
                              self.intercepts_[i, j]
                     k = np.count_nonzero(self.estimates_[i, j, :])
                     adaptive_scores[i, j] = adaptive.score_predictions(
-                                            y, y_pred, k, self.penalty_[i])
+                                            y, y_pred, k, np.max(self.penalty_[i]))
 
             self.rp_max_idx_ = np.argmax(adaptive_scores, axis = 1)
+
 #            self.penalty_ = self.manual_penalty[penalty_index]
             
 #            self.rp_max_idx_ = np.argmax(self.scores_[..., penalty_index], axis=1)
