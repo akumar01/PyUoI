@@ -1,14 +1,13 @@
-import numpy as np
+from sklearn.linear_model import Lasso, LinearRegression
+from sklearn.linear_model.coordinate_descent import _alpha_grid
 
 from .base import AbstractUoILinearRegressor
 
-from sklearn.linear_model import LinearRegression
-from sklearn.linear_model.coordinate_descent import _alpha_grid
-from sklearn.linear_model import ElasticNet
+import numpy as np
+import pdb
 
-
-class UoI_ElasticNet(AbstractUoILinearRegressor, LinearRegression):
-    """ UoI ElasticNet model.
+class UoI_AdaptiveLasso(AbstractUoILinearRegressor, LinearRegression):
+    """ UoI Adaptive Lasso model.
 
     Parameters
     ----------
@@ -20,6 +19,13 @@ class UoI_ElasticNet(AbstractUoILinearRegressor, LinearRegression):
         The number of data bootstraps to use in the estimation module.
         Increasing this number will relax selection and decrease variance.
 
+    n_lambdas : int, default 48
+        The number of regularization values to use for selection.
+
+    alpha : list or ndarray of floats
+        The parameter that trades off L1 versus L2 regularization for a given
+        lambda.
+
     selection_frac : float, default 0.9
         The fraction of the dataset to use for training in each resampled
         bootstrap, during the selection module. Small values of this parameter
@@ -29,15 +35,7 @@ class UoI_ElasticNet(AbstractUoILinearRegressor, LinearRegression):
         The fraction of the dataset to use for training in each resampled
         bootstrap, during the estimation module. The remaining data is used
         to obtain validation scores. Small values of this parameters imply
-        larger "perturbations" to the dataset. IGNORED - Leaving this here
-        to double check later
-
-    n_lambdas : int, default 48
-        The number of regularization values to use for selection.
-
-    alphas : list or ndarray of floats
-        The parameter that trades off L1 versus L2 regularization for a given
-        lambda.
+        larger "perturbations" to the dataset.
 
     stability_selection : int, float, or array-like, default 1
         If int, treated as the number of bootstraps that a feature must
@@ -96,94 +94,69 @@ class UoI_ElasticNet(AbstractUoILinearRegressor, LinearRegression):
         boolean array indicating whether a given regressor (column) is selected
         for estimation for a given regularization parameter value (row).
     """
+
     def __init__(self, n_boots_sel=48, n_boots_est=48, selection_frac=0.9,
-                 estimation_frac=0.9, n_lambdas=48,
-                 alphas=np.array([0.5]), stability_selection=1.,
-                 estimation_score='r2', warm_start=True, eps=1e-3,
+                 estimation_frac=0.9, n_lambdas=48, stability_selection=1.,
+                 estimation_score='r2', eps=1e-3, warm_start=True,
                  copy_X=True, fit_intercept=True, standardize=True,
                  max_iter=1000, random_state=None, comm=None,
                  manual_penalty = [1], true_support = None):
-        super(UoI_ElasticNet, self).__init__(
+        super(UoI_AdaptiveLasso, self).__init__(
             n_boots_sel=n_boots_sel,
             n_boots_est=n_boots_est,
             selection_frac=selection_frac,
             estimation_frac=estimation_frac,
             stability_selection=stability_selection,
-            estimation_score=estimation_score,
             copy_X=copy_X,
             fit_intercept=fit_intercept,
             standardize=standardize,
             random_state=random_state,
             comm=comm,
-            max_iter=max_iter,
+            estimation_score=estimation_score,
+            max_iter=max_iter
         )
-        self.n_lambdas = n_lambdas
-        self.alphas = alphas
-        self.n_alphas = len(alphas)
-        self.warm_start = warm_start
-        self.eps = eps
-        self.lambdas = None
-        self._selection_lm = ElasticNet(
-            fit_intercept=fit_intercept,
-            max_iter=max_iter,
-            copy_X=copy_X,
-            warm_start=warm_start,
-            random_state=random_state)
-        self._estimation_lm = LinearRegression()
 
         self.manual_penalty = manual_penalty
         self.true_support = true_support
 
+        self.n_lambdas = n_lambdas
+        self.eps = eps
+        self._selection_lm = AdaptiveLasso(
+            max_iter=max_iter,
+            warm_start=warm_start,
+            random_state=random_state,
+            fit_intercept=fit_intercept)
+        self._estimation_lm = LinearRegression()
 
     def get_reg_params(self, X, y):
-        r"""Calculates the regularization parameters (alpha and lambda) to be
-        used for the provided data.
+        alphas = _alpha_grid(
+            X=X, y=y,
+            l1_ratio=1.0,
+            fit_intercept=self.fit_intercept,
+            eps=self.eps,
+            n_alphas=self.n_lambdas)
+        return [{'alpha': a} for a in alphas]
 
-        Note that the Elastic Net penalty is given by
+# Lasso estimator where the weights are initialzied with OLS
+class AdaptiveLasso(Lasso): 
 
-        .. math::
-           \frac{1}{2\ \text{n_samples}} ||y - Xb||^2_2
-           + \lambda (\alpha |b|_1 + 0.5 (1 - \alpha) |b|^2_2)
+    def fit(self, X, y): 
 
-        where lambda and alpha are regularization parameters.
+        # Initialize estimates with OLS
+        beta_0 = LinearRegression(fit_intercept = self.fit_intercept, 
+                                  normalize = self.normalize).fit(X, y).coef_
 
-        Scikit-learn does not use these names. Instead, scitkit-learn
-        denotes alpha by 'l1_ratio' and lambda by 'alpha'.
 
-        Parameters
-        ----------
-        X : array-like, shape (n_samples, n_features)
-            The design matrix.
+        # Re-normalize X by L2 norm of coefficients to feed into 
+        # usual Lasso problem
+        w = np.sqrt(np.power(beta_0, 2))
+        try:    
+            X = X @ np.linalg.inv(np.diag(w.ravel()))
+        except:
+            pdb.set_trace()
+        super(AdaptiveLasso, self).fit(X, y)
 
-        y : array-like, shape (n_samples)
-            The response vector.
+        # Transform the cofficients
+        self.coef_ = np.linalg.inv(np.diag(w.ravel())) @ self.coef_
 
-        Returns
-        -------
-        reg_params : a list of dictionaries
-            A list containing dictionaries with the value of each
-            (lambda, alpha) describing the type of regularization to impose.
-            The keys adhere to scikit-learn's terminology (lambda->alpha,
-            alpha->l1_ratio). This allows easy passing into the ElasticNet
-            object.
-        """
-        if self.lambdas is None:
-            self.lambdas = np.zeros((self.n_alphas, self.n_lambdas))
-            # a set of lambdas are generated for each alpha value (l1_ratio in
-            # sci-kit learn parlance)
-            for alpha_idx, alpha in enumerate(self.alphas):
-                self.lambdas[alpha_idx, :] = _alpha_grid(
-                    X=X, y=y,
-                    l1_ratio=alpha,
-                    fit_intercept=self.fit_intercept,
-                    eps=self.eps,
-                    n_alphas=self.n_lambdas)
-
-        # place the regularization parameters into a list of dictionaries
-        reg_params = list()
-        for alpha_idx, alpha in enumerate(self.alphas):
-            for lamb_idx, lamb in enumerate(self.lambdas[alpha_idx]):
-                # reset the regularization parameter
-                reg_params.append(dict(alpha=lamb, l1_ratio=alpha))
-
-        return reg_params
+        return self 

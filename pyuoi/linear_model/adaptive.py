@@ -1,6 +1,62 @@
 import numpy as np
 from pyuoi.utils import log_likelihood_glm, MIC
+import scipy
+import pdb
+
+# sum of squares loss
+def ss_loss(y, y_pred, n_features, penalty, ss, split_return = False):
+
+    # Don't get burned!
+    y = y.ravel()
+    y_pred = y_pred.ravel()
+
+    rss = np.sum((y - y_pred)**2)
+
+#    loss = y.size/2 * np.log(rss) + penalty * n_features * ss 
+    loss = rss + penalty * n_features * ss
+
+    if split_return:
+        return rss, penalty * n_features * ss
+    else:
+        return loss
+
+# sum of squares loss with concave function 
+def ss_loss2(y, y_pred, n_features, penalty, ss, split_return = False):
+
+    # Don't get burned!
+    y = y.ravel()
+    y_pred = y_pred.ravel()
+
+    rss = np.sum((y - y_pred)**2)
+
+    # Multiplicity of model size
+    M = scipy.special.binom(50, n_features)
+
+#    loss = y.size/2 * np.log(rss) + penalty * n_features * ss 
+    loss = rss + penalty * (n_features + 2 * np.sqrt(np.log(M))) * ss
+
+    if split_return:
+        return rss, penalty * (n_features + 2 * np.sqrt(np.log(M))) * ss
+    else:
+        return loss
+
+        
+def minimal_penalty(y, y_pred, n_features, penalty, M, split_return = False):
     
+    y = y.ravel()
+    y_pred = y_pred.ravel()
+
+    rss = np.sum((y - y_pred)**2)
+
+    H_D = 1/n_features * np.sqrt(np.log(M))
+
+#    dim_penalty = penalty * n_features * (1 + 2 * np.sqrt(H_D) + 2 * H_D)
+    dim_penalty = penalty * (n_features + 2 * np.sqrt(np.log(M)))
+    if split_return:
+        return rss, dim_penalty
+    else:
+        return dim_penalty + rss
+
 def score_predictions(y, y_pred, n_features, penalty):
     
     # Don't get burned!
@@ -9,7 +65,7 @@ def score_predictions(y, y_pred, n_features, penalty):
 
     ll = log_likelihood_glm('normal', y, y_pred)
     score = MIC(ll, n_features, penalty)
-    return -1*score
+    return score
 
 # Attempt 1: Shouldn't the GDF of OLS just be the number of 
 # features? This makes the whole procedure very straightforward
@@ -25,6 +81,7 @@ def naive_adaptive_penalty(X, y, estimates, support_idxs, supports, lambdas):
         estimator_losses[i] = gdf - log_likelihood_glm('normal', y, y_pred)
 
     lambda_hat = lambdas[np.argmin(estimator_losses)]
+
     return lambda_hat
 
 # calculate the adaptive mdoel penalty 
