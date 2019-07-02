@@ -40,7 +40,61 @@ def ss_loss2(y, y_pred, n_features, penalty, ss, split_return = False):
     else:
         return loss
 
-        
+# MIC
+def MIC(y, y_pred, model_size, penalty):
+
+    n_samples = y.size
+
+    ll = log_likelihood_glm('normal', y, y_pred)
+
+    MIC = -2 * ll + model_size * penalty
+
+    return MIC
+
+# Ordinary BIC
+def BIC(y, y_pred, model_size):
+
+    n_samples = y.size
+
+    ll = log_likelihood_glm('normal', y, y_pred)
+
+    BIC = -2 * ll + model_size * np.log(n_samples)
+
+    return BIC
+
+# modified BIC penalty with some prior on the model size
+def mBIC(y, y_pred, model_size, sparsity_prior):
+
+    # make sure sparsity prior is epsilon less than 1
+    if sparsity_prior == 1:
+        sparsity_prior = 0.9999
+
+    mBIC =  BIC(y, y_pred, model_size) + 2 * model_size * np.log(1/sparsity_prior - 1)
+
+    return mBIC
+
+# Extended BIC criterion
+def eBIC(y, y_pred, n_features, model_size):
+
+    # Kappa is a hyperparameter tuning the strength of the effect (1 -> no effect)
+    kappa = 0
+
+    eBIC = BIC(y, y_pred, model_size) + \
+    n_features *  2 * (1 - kappa) * np.log(float(scipy.special.binom(n_features, model_size)))
+
+    return eBIC
+
+# Further modified BIC criterion
+def mBIC2(y, y_pred, n_features, sparsity_prior):
+
+    mBIC2 = mBIC(y, y_pred, n_features, sparsity_prior) - 2 * np.log(float(np.math.factorial(n_features)))
+
+    return mBIC2
+
+# ERIC criterion for sparsity estimation
+def ERIC():
+    pass
+
 def minimal_penalty(y, y_pred, n_features, penalty, M, split_return = False):
     
     y = y.ravel()
