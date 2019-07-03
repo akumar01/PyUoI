@@ -3,6 +3,61 @@ from pyuoi.utils import log_likelihood_glm, MIC
 import scipy
 import pdb
 
+# Full Bayesian model penalty selection
+def bayesian_lambda_selection(y, y_pred, n_features, model_size, sparsity_prior, penalty):
+
+    y = y.ravel()
+    y_pred = y_pred.ravel()
+
+    n_samples = y.size
+
+    # Log likelihood
+    ll = log_likelihood_glm('normal', y, y_pred)
+
+    # Regularization Penalty
+    p1 = 2 * penalty * model_size
+
+    # Normal BIC penalty
+    BIC = model_size * np.log(n_samples)
+
+    # Second order Bayes factor approximation
+    RSS = np.sum((y - y_pred)**2)
+    BIC2 = n_samples**3/(2 * RSS*3)
+
+    # Term arising from normalization
+    BIC3 = model_size * np.log(2 * np.pi)
+
+    if sparsity_prior == 1:
+        sparsity_prior = 0.999
+
+    # Model probability prior
+    M_k = scipy.special.binom(n_features, model_size) * \
+          sparsity_prior**model_size * (1 - sparsity_prior)**(n_features - model_size)
+    if M_k == 0:
+        pdb.set_trace()
+    P_M = 2 * np.log(M_k)
+
+    return ll, p1, BIC, BIC2, BIC3, M_k, P_M
+
+# Bayes factor approximation with a prior probability on models placed
+# according to their sparsity
+def bayesian_log_ll(y, y_pred, n_features, model_size, sparsity_prior):
+
+    # Don't get burned!
+    y = y.ravel()
+    y_pred = y_pred.ravel()
+
+    ll = log_likelihood_glm('normal', y, y_pred)
+
+    # Calculate the prior weight
+    prior_weight = scipy.special.binom(n_features, model_size) * \
+                   sparsity_prior**model_size * (1 - sparsity_prior)**(n_features - model_size)
+
+    pdb.set_trace()
+
+    # Negate to use argmin
+    return ll * prior_weight
+
 # sum of squares loss
 def ss_loss(y, y_pred, n_features, penalty, ss, split_return = False):
 
@@ -12,7 +67,7 @@ def ss_loss(y, y_pred, n_features, penalty, ss, split_return = False):
 
     rss = np.sum((y - y_pred)**2)
 
-#    loss = y.size/2 * np.log(rss) + penalty * n_features * ss 
+#    loss = y.size/2 * np.log(rss) + penalty * n_features * ss
     loss = rss + penalty * n_features * ss
 
     if split_return:
@@ -20,7 +75,7 @@ def ss_loss(y, y_pred, n_features, penalty, ss, split_return = False):
     else:
         return loss
 
-# sum of squares loss with concave function 
+# sum of squares loss with concave function
 def ss_loss2(y, y_pred, n_features, penalty, ss, split_return = False):
 
     # Don't get burned!
@@ -32,7 +87,7 @@ def ss_loss2(y, y_pred, n_features, penalty, ss, split_return = False):
     # Multiplicity of model size
     M = scipy.special.binom(50, n_features)
 
-#    loss = y.size/2 * np.log(rss) + penalty * n_features * ss 
+#    loss = y.size/2 * np.log(rss) + penalty * n_features * ss
     loss = rss + penalty * (n_features + 2 * np.sqrt(np.log(M))) * ss
 
     if split_return:
@@ -96,7 +151,7 @@ def ERIC():
     pass
 
 def minimal_penalty(y, y_pred, n_features, penalty, M, split_return = False):
-    
+
     y = y.ravel()
     y_pred = y_pred.ravel()
 
@@ -112,7 +167,7 @@ def minimal_penalty(y, y_pred, n_features, penalty, M, split_return = False):
         return dim_penalty + rss
 
 def score_predictions(y, y_pred, n_features, penalty):
-    
+
     # Don't get burned!
     y = y.ravel()
     y_pred = y_pred.ravel()
@@ -121,7 +176,7 @@ def score_predictions(y, y_pred, n_features, penalty):
     score = MIC(ll, n_features, penalty)
     return score
 
-# Attempt 1: Shouldn't the GDF of OLS just be the number of 
+# Attempt 1: Shouldn't the GDF of OLS just be the number of
 # features? This makes the whole procedure very straightforward
 def naive_adaptive_penalty(X, y, estimates, support_idxs, supports, lambdas):
 
@@ -138,11 +193,11 @@ def naive_adaptive_penalty(X, y, estimates, support_idxs, supports, lambdas):
 
     return lambda_hat
 
-# calculate the adaptive mdoel penalty 
+# calculate the adaptive mdoel penalty
 def calc_adaptive_penalty(P, supports, X, y):
 
-    # First step: Over the range of lambda values considered, and the set of 
-    # models, calculate the 
+    # First step: Over the range of lambda values considered, and the set of
+    # models, calculate the
 
     y = y.ravel()
 
@@ -181,7 +236,7 @@ def adaptive_estimation_penalty(P, supports, X, y):
     D_lambda = np.zeros(Lambda.size)
 
     # For each lambda, find the model that scores the best using the penalty
-    # defined by that lambda.Then, calculate the model sensitivity using 
+    # defined by that lambda.Then, calculate the model sensitivity using
     # random perturbation
     for i, l in enumerate(Lambda):
         t0 = time.time()
@@ -194,19 +249,19 @@ def adaptive_estimation_penalty(P, supports, X, y):
 
         y_tilde = np.random.multivariate_normal(y.ravel(), sigma_squared * np.identity(n_samples),
                             size = T)
-        
+
         y_star = np.array([y.ravel() + tau * (y_tilde[j, :] - y.ravel()) for j in range(T)])
 
         # Resulting estimators when the data has been perturbed
         perturbation_responses = np.zeros((T, n_samples))
 
-        for j in range(T): 
+        for j in range(T):
             # Perturb the data
             yy = y_star[j, :]
 
-            # Recalculate the model losses and select the best model estimate for the 
+            # Recalculate the model losses and select the best model estimate for the
             # perturbed data
-            perturbed_model_losses = [model_loss(yy.ravel(), X @ P[k, ...] @ yy, sigma_squared + tau**2, 
+            perturbed_model_losses = [model_loss(yy.ravel(), X @ P[k, ...] @ yy, sigma_squared + tau**2,
                     np.count_nonzero(1 * supports[k, :]), l) for k in range(n_models)]
             min_loss_idx = np.argmin(perturbed_model_losses)
             perturbation_responses[j, :] = X @ P[min_loss_idx, ...] @ yy
@@ -214,10 +269,10 @@ def adaptive_estimation_penalty(P, supports, X, y):
 
         # Estimate the generalized degrees of freedom from means over the Monte Carlo procedure:
         D_lambda[i] = 1/tau**2 * 1/(T - 1) * np.sum(np.multiply(
-                                    (perturbation_responses - np.mean(perturbation_responses, axis = 0)), 
+                                    (perturbation_responses - np.mean(perturbation_responses, axis = 0)),
                                     (y_star - np.mean(y_star, axis = 0))))
 
-        loss_estimate[i] = loss_estimator_loss(y.ravel(), X @ M_hat[i, :], D_lambda[i])   
+        loss_estimate[i] = loss_estimator_loss(y.ravel(), X @ M_hat[i, :], D_lambda[i])
         #print(time.time() - t0)
 
     adaptive_loss_penalty = Lambda[np.argmin(loss_estimate)]
