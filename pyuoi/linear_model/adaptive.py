@@ -14,7 +14,7 @@ def bayesian_lambda_selection(y, y_pred, n_features, model_size, sparsity_prior,
     # Log likelihood
     ll = log_likelihood_glm('normal', y, y_pred)
 
-    # Regularization Penalty
+    # Regularization Penalty (prior)
     p1 = 2 * penalty * model_size
 
     # Normal BIC penalty
@@ -27,17 +27,65 @@ def bayesian_lambda_selection(y, y_pred, n_features, model_size, sparsity_prior,
     # Term arising from normalization
     BIC3 = model_size * np.log(2 * np.pi)
 
-    if sparsity_prior == 1:
-        sparsity_prior = 0.999
+    # If provided with a list of sparsity estimates, we are specifying
+    # a beta hyperprior, and need to integrate over it correspondingly
+    if not np.isscalar(sparsity_prior):
+        M_k = beta_binomial_model(sparsity_prior, n_features, model_size)
+    else:
+        if sparsity_prior == 1:
+            sparsity_prior = 0.999
 
-    # Model probability prior
-    M_k = scipy.special.binom(n_features, model_size) * \
-          sparsity_prior**model_size * (1 - sparsity_prior)**(n_features - model_size)
-    if M_k == 0:
-        pdb.set_trace()
+        # Model probability prior
+        M_k = scipy.special.binom(n_features, model_size) * \
+              sparsity_prior**model_size * (1 - sparsity_prior)**(n_features - model_size)
+
     P_M = 2 * np.log(M_k)
 
+#    bayes_factor = 2 * ll - BIC - BIC2 + BIC3 - p1 + P_M
+
     return ll, p1, BIC, BIC2, BIC3, M_k, P_M
+
+
+# Return a posterior estimate for the binomial parameter given a 
+# beta-distribution prior on estimates of that parameter 
+def beta_binomial_model(x, n, k):
+
+    # Fit the parameters of the beta distribution
+    a, b, _, _ = scipy.stats.beta.fit(x, floc = 0, fscale = 1)
+
+    p = scipy.special.binom(n, k) * \
+            scipy.special.beta(k + a, n - k + b)/scipy.special.beta(a, b)
+    
+    return p
+
+# L1 penalized Bayes factor
+def L1_bayes(y, y_pred, coefs, l1):
+
+    y = y.ravel()
+    y_pred = y_pred.ravel()
+
+    n_samples = y.size
+    model_size = np.count_nonzero(coefs)
+
+    ll = log_likelihood_glm('normal', y, y_pred)
+
+    # Regularization penalty
+    prior = 2 * l1 * np.linalg.norm(coefs, 1)
+
+    # Normal BIC penalty
+    BIC = model_size * np.log(n_samples)
+
+    # Second order Bayes factor approximation
+    RSS = np.sum((y - y_pred)**2)
+    BIC2 = n_samples**3/(2 * RSS*3)
+
+    # Term arising from normalization
+    BIC3 = model_size * np.log(2 * np.pi)
+
+    bayes_factor = 2 * ll - BIC - BIC2 + BIC3# - prior
+
+    return bayes_factor
+
 
 # Bayes factor approximation with a prior probability on models placed
 # according to their sparsity
