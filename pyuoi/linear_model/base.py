@@ -2,7 +2,7 @@ import abc as _abc
 import six as _six
 import numpy as np
 import logging
-
+import time
 from sklearn.linear_model.base import SparseCoefMixin
 from sklearn.metrics import r2_score, accuracy_score, log_loss
 from sklearn.model_selection import train_test_split
@@ -192,50 +192,18 @@ class AbstractUoILinearModel(
         """
         pass
 
-    def fit(self, X, y, stratify=None, verbose=False):
-        """Fit data according to the UoI algorithm.
-
-        Parameters
-        ----------
-        X : ndarray or scipy.sparse matrix, (n_samples, n_features)
-            The design matrix.
-
-        y : ndarray, shape (n_samples,)
-            Response vector. Will be cast to X's dtype if necessary.
-            Currently, this implementation does not handle multiple response
-            variables.
-
-        stratify : array-like or None, default None
-            Ensures groups of samples are alloted to training/test sets
-            proportionally. Labels for each group must be an int greater
-            than zero. Must be of size equal to the number of samples, with
-            further restrictions on the number of groups.
-
-        verbose : boolean
-            A switch indicating whether the fitting should print out messages
-            displaying progress.
-        """
-        if verbose:
-            self._logger.setLevel(logging.DEBUG)
-        else:
-            self._logger.setLevel(logging.WARNING)
-
-        X, y = self._pre_fit(X, y)
-
-        X, y = check_X_y(X, y, accept_sparse=['csr', 'csc', 'coo'],
-                         y_numeric=True, multi_output=True)
-
-        # extract model dimensions
-        n_features = X.shape[1]
-
-        n_coef = self.get_n_coef(X, y)
-
+    def selection(self, X, y, stratify, verbose):
         ####################
         # Selection Module #
         ####################
+        n_coef = self.n_coef
+
+        n_features = self.n_features
+
         # choose the regularization parameters for selection sweep
         self.reg_params_ = self.get_reg_params(X, y)
         self.n_reg_params_ = len(self.reg_params_)
+
 
         rank = 0
         size = 1
@@ -340,11 +308,21 @@ class AbstractUoILinearModel(
 
         if rank == 0:
             self._logger.info("Found %d supports" % self.n_supports_)
-
+    def estimation(self, X, y, stratify, verbose):
         #####################
         # Estimation Module #
         #####################
         # set up data arrays
+        
+        n_features = self.n_features
+        n_coef = self.n_coef
+
+        rank = 0
+        size = 1
+        if self.comm is not None:
+            rank = self.comm.rank
+            size = self.comm.size
+
         tasks = np.array_split(np.arange(self.n_boots_est *
                                          self.n_supports_), size)[rank]
         my_boots = dict((task_idx // self.n_supports_, None)
@@ -455,6 +433,53 @@ class AbstractUoILinearModel(
             self.coef_ = np.median(best_estimates,
                                    axis=0).reshape(self.output_dim, n_features)
             self._fit_intercept(X, y)
+
+
+
+    def fit(self, X, y, stratify=None, verbose=False):
+        """Fit data according to the UoI algorithm.
+
+        Parameters
+        ----------
+        X : ndarray or scipy.sparse matrix, (n_samples, n_features)
+            The design matrix.
+
+        y : ndarray, shape (n_samples,)
+            Response vector. Will be cast to X's dtype if necessary.
+            Currently, this implementation does not handle multiple response
+            variables.
+
+        stratify : array-like or None, default None
+            Ensures groups of samples are alloted to training/test sets
+            proportionally. Labels for each group must be an int greater
+            than zero. Must be of size equal to the number of samples, with
+            further restrictions on the number of groups.
+
+        verbose : boolean
+            A switch indicating whether the fitting should print out messages
+            displaying progress.
+        """
+        if verbose:
+            self._logger.setLevel(logging.DEBUG)
+        else:
+            self._logger.setLevel(logging.WARNING)
+
+        X, y = self._pre_fit(X, y)
+
+        X, y = check_X_y(X, y, accept_sparse=['csr', 'csc', 'coo'],
+                         y_numeric=True, multi_output=True)
+
+        # extract model dimensions
+        self.n_features = X.shape[1]
+
+        self.n_coef = self.get_n_coef(X, y)
+
+        # Selection module
+        self.selection(X, y, stratify, verbose)
+
+        # Estimation module
+        self.estimation(X, y, stratify, verbose)
+
         self._post_fit(X, y)
 
         return self
