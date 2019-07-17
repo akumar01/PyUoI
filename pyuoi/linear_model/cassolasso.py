@@ -158,10 +158,9 @@ class PycassoLasso():
                       useintercept = self.fit_intercept, lambdas = alphas,
                       penalty = 'l1', max_ite = self.max_iter)
 
-    def fit(self):
+    def fit(self, X, y, alphas):
 
+        self.init_solver(X, y, alphas)
         self.solver.train()
         # Coefs across the entire solution path
         self.coef_ = self.solver.result['beta']
-
-        
