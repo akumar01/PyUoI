@@ -326,6 +326,9 @@ class AbstractUoILinearModel(
                                          self.n_supports_), size)[rank]
         my_boots = dict((task_idx // self.n_supports_, None)
                         for task_idx in tasks)
+
+        self.boots = my_boots
+
         estimates = np.zeros((tasks.size, n_coef))
 
         for boot in range(self.n_boots_est):

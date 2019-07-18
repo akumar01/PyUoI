@@ -139,9 +139,7 @@ class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
         alphas = np.array([reg_param_values[i]['alpha'] 
                            for i in range(len(reg_param_values))])
 
-        self._selection_lm.init_solver(X, y, alphas)
-
-        self._selection_lm.fit()
+        self._selection_lm.fit(X, y, alphas)
 
         return self._selection_lm.coef_
 
