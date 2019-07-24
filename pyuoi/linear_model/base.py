@@ -327,8 +327,6 @@ class AbstractUoILinearModel(
         my_boots = dict((task_idx // self.n_supports_, None)
                         for task_idx in tasks)
 
-        self.boots = my_boots
-
         estimates = np.zeros((tasks.size, n_coef))
 
         for boot in range(self.n_boots_est):
@@ -350,6 +348,8 @@ class AbstractUoILinearModel(
                     test_size=1 - self.estimation_frac,
                     stratify=stratify,
                     random_state=self.random_state)
+        
+        self.boots = my_boots
 
         # score (r2/AIC/AICc/BIC) for each bootstrap for each support
         scores = np.zeros(tasks.size)
