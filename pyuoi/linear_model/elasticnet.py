@@ -2,7 +2,7 @@ import numpy as np
 
 from .base import AbstractUoILinearRegressor
 
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression, RidgeCV
 from sklearn.linear_model.coordinate_descent import _alpha_grid
 from sklearn.linear_model import ElasticNet
 
@@ -163,23 +163,14 @@ class UoI_ElasticNet(AbstractUoILinearRegressor, LinearRegression):
             alpha->l1_ratio). This allows easy passing into the ElasticNet
             object.
         """
-        if self.lambdas is None:
-            self.lambdas = np.zeros((self.n_alphas, self.n_lambdas))
-            # a set of lambdas are generated for each alpha value (l1_ratio in
-            # sci-kit learn parlance)
-            for alpha_idx, alpha in enumerate(self.alphas):
-                self.lambdas[alpha_idx, :] = _alpha_grid(
-                    X=X, y=y,
-                    l1_ratio=alpha,
-                    fit_intercept=self.fit_intercept,
-                    eps=self.eps,
-                    n_alphas=self.n_lambdas)
 
-        # place the regularization parameters into a list of dictionaries
+        # Run RidgeCV to determine L2 penalty
+        rdge = RidgeCV(alphas = np.linspace(1e-5, 100, 500)).fit(X, y)
+        l2 = rdge.alpha_
+        l1s = _alpha_grid(X, y, fit_intercept = self.fit_intercept,
+                               eps = self.eps, n_alphas = self.n_lambdas)
         reg_params = list()
-        for alpha_idx, alpha in enumerate(self.alphas):
-            for lamb_idx, lamb in enumerate(self.lambdas[alpha_idx]):
-                # reset the regularization parameter
-                reg_params.append(dict(alpha=lamb, l1_ratio=alpha))
+        for l1 in l1s:
+            reg_params.append(dict(alpha = l1 + 2 * l2, l1_ratio = l1/(l1 + 2 * l2)))
 
         return reg_params
