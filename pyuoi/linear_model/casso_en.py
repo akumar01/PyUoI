@@ -228,31 +228,61 @@ class PycassoElasticNet():
         self.max_iter = max_iter
         self.fit_intercept = fit_intercept
 
-    def init_solver(self, X, y, lambda1, lambda2):
+    def init_solver(self, X, y, lambda1 = None, lambda2 = None):
+
+        # Set lambda2 using a RidgeCV fit
+        if lambda2 is None:
+            rdge = RidgeCV(alphas = np.linspace(1e-5, 20, 100)).fit(X, y)
+            lambda2 = rdge.alpha_
+        self.lambda2 = lambda2
+
+        self.dummy_path = False
+
+        if lambda1 is None:
+            lambda1 = _alpha_grid(X, y, n_alphas = 100)
+        else:
+            if np.isscalar(lambda1):
+                lambda1 = np.array([lambda1])
+            lambda1 = np.flipud(np.sort(lambda1))
+            if lambda1.size < 3:
+                lambda1 = np.sort(lambda1)
+                # Create a dummy path for the path solver
+                self.dummy_path = True
+                self.pathlength = lambda1.size
+                while lambda1.size < 3:
+                    lambda1 = np.append(lambda1, lambda1[-1]/2)
+        self.lambda1 = lambda1
 
         # We solve for an entire elastic net path with a fixed lambda2
         # For the given fixed lambda1, we modify the dataset to allow 
         # for the solution of a lasso-like problem
-
-        self.lambda2 = lambda2
-
-        xx, yy = augment_data(X, y, lambda2)
+        xx, yy = augment_data(X, y, self.lambda2)
 
         # Augmented regularization parameters
-        gamma = lambda1/np.sqrt(1 + lambda2)
-
+        gamma = self.lambda1/np.sqrt(1 + self.lambda2)
         self.solver = pycasso.Solver(xx, yy, family = 'gaussian', 
                       useintercept = self.fit_intercept, lambdas = gamma,
                       penalty = 'l1', max_ite = self.max_iter)
 
-    def fit(self):
-
+    def fit(self, X, y, lambda1 = None, lambda2 = None):
+        self.init_solver(X, y, lambda1, lambda2)
         self.solver.train()
         # Coefs across the entire solution path
         beta_naive = self.solver.result['beta']
 
-        # Rescale the coefficients accordingly (eq 12 in the Elastic Net paper)
-        self.coef_ = (1 + self.lambda2) * beta_naive
+    
+        if self.dummy_path:
+            beta_naive = beta_naive[:self.pathlength, :]
+
+        # Rescale coefficients (eq. 11 of Elastic Net paper)
+        self.coef_ = np.sqrt(1 + self.lambda2) * beta_naive
+
+        # Record regularization parameters
+        reg_params = np.zeros((self.lambda1.size, 2))
+        reg_params[:, 0] = self.lambda2
+        reg_params[:, 1] = self.lambda1
+
+        self.reg_params = reg_params
 
 # Augment data so ElasticNet becomes an l1 regularization problem 
 def augment_data(X, y, l2):
@@ -263,7 +293,7 @@ def augment_data(X, y, l2):
         y = y[:, np.newaxis]
 
     # Augment the data
-    XX = 1/np.sqrt(1 + l2) * np.vstack([X, np.sqrt(l2) * np.eye(n_features)])
+    XX = 1/np.sqrt(1 + l2) * np.vstack([X, np.sqrt(2 * n_samples) * np.sqrt(l2) * np.eye(n_features)])
     yy = np.vstack([y, np.zeros((n_features, 1))])
-
+ 
     return XX, yy
