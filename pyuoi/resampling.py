@@ -63,7 +63,15 @@ def bootstrap(X, y, sampling_frac, stratify=None, random_state=None):
 
 	return train_idxs, test_idxs
 
-def block_train_test_split():
+def block_train_test_split(X, y, sampling_frac, L, random_state=None):
+	'''Moving block bootstrap. Divide the time series of length n_samples
+	into overlapping blocks of length L. Then, choose one of those blocks
+	and sample, without replacement, 
+
+	if random_state is not None:
+		np.random.seed(random_state)
+
+
 
 
 def block_boostrap():
