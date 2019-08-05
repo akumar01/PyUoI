@@ -2,6 +2,7 @@ import abc as _abc
 import six as _six
 import numpy as np
 import logging
+
 from sklearn.linear_model.base import SparseCoefMixin
 from sklearn.metrics import r2_score, accuracy_score, log_loss
 from sklearn.model_selection import train_test_split
@@ -191,50 +192,18 @@ class AbstractUoILinearModel(
         """
         pass
 
-    def fit(self, X, y, stratify=None, verbose=False):
-        """Fit data according to the UoI algorithm.
-
-        Parameters
-        ----------
-        X : ndarray or scipy.sparse matrix, (n_samples, n_features)
-            The design matrix.
-
-        y : ndarray, shape (n_samples,)
-            Response vector. Will be cast to X's dtype if necessary.
-            Currently, this implementation does not handle multiple response
-            variables.
-
-        stratify : array-like or None, default None
-            Ensures groups of samples are alloted to training/test sets
-            proportionally. Labels for each group must be an int greater
-            than zero. Must be of size equal to the number of samples, with
-            further restrictions on the number of groups.
-
-        verbose : boolean
-            A switch indicating whether the fitting should print out messages
-            displaying progress.
-        """
-        if verbose:
-            self._logger.setLevel(logging.DEBUG)
-        else:
-            self._logger.setLevel(logging.WARNING)
-
-        X, y = self._pre_fit(X, y)
-
-        X, y = check_X_y(X, y, accept_sparse=['csr', 'csc', 'coo'],
-                         y_numeric=True, multi_output=True)
-
-        # extract model dimensions
-        n_features = X.shape[1]
-
-        n_coef = self.get_n_coef(X, y)
-
+    def selection(self, X, y, stratify, verbose):
         ####################
         # Selection Module #
         ####################
+        n_coef = self.n_coef
+
+        n_features = self.n_features
+
         # choose the regularization parameters for selection sweep
         self.reg_params_ = self.get_reg_params(X, y)
         self.n_reg_params_ = len(self.reg_params_)
+
 
         rank = 0
         size = 1
@@ -338,15 +307,30 @@ class AbstractUoILinearModel(
         if rank == 0:
             self._logger.info("Found %d supports" % self.n_supports_)
 
+    def estimation(self, X, y, stratify, verbose):
         #####################
         # Estimation Module #
         #####################
         # set up data arrays
+        
+        n_features = self.n_features
+        n_coef = self.n_coef
+
+        rank = 0
+        size = 1
+        if self.comm is not None:
+            rank = self.comm.rank
+            size = self.comm.size
+
         tasks = np.array_split(np.arange(self.n_boots_est *
                                          self.n_supports_), size)[rank]
         my_boots = dict((task_idx // self.n_supports_, None)
                         for task_idx in tasks)
-        estimates = np.zeros((tasks.size, n_coef))
+
+        # Log both the estimates and the intercepts to make sure we 
+        # can precisely reconstruct things afterwards
+        estimates = np.zeros((tasks.size, n_coef))      
+        intercepts = np.zeros((tasks.size, 1))
 
         for boot in range(self.n_boots_est):
             if size > 1:
@@ -367,6 +351,8 @@ class AbstractUoILinearModel(
                     test_size=1 - self.estimation_frac,
                     stratify=stratify,
                     random_state=self.random_state)
+        
+        self.boots = my_boots
 
         # score (r2/AIC/AICc/BIC) for each bootstrap for each support
         scores = np.zeros(tasks.size)
@@ -389,16 +375,18 @@ class AbstractUoILinearModel(
                     self._estimation_lm.fit(X_rep[:, support], y_rep)
                     estimates[ii, np.tile(support, self.output_dim)] = \
                         self._estimation_lm.coef_.ravel()
+                    intercepts[ii] = self._estimation_lm.intercept_
                 else:
                     self._estimation_lm.fit(X_rep, y_rep, coef_mask=support)
                     estimates[ii] = self._estimation_lm.coef_.ravel()
-
+                    intercepts[ii] = self._estimation_lm.intercept_
                 scores[ii] = self._score_predictions(
                     metric=self.estimation_score,
                     fitter=self._estimation_lm,
                     X=X, y=y,
                     support=support,
                     boot_idxs=my_boots[boot_idx])
+
             else:
                 fitter = self._fit_intercept_no_features(y_rep)
                 if issparse(X):
@@ -415,6 +403,8 @@ class AbstractUoILinearModel(
         if size > 1:
             estimates = Gatherv_rows(send=estimates, comm=self.comm,
                                      root=0)
+            intercepts = Gatherv_rows(send=intercepts, comm=self.comm,
+                                      root=0)
             scores = Gatherv_rows(send=scores, comm=self.comm,
                                   root=0)
             self.rp_max_idx_ = None
@@ -424,6 +414,7 @@ class AbstractUoILinearModel(
             if rank == 0:
                 estimates = estimates.reshape(self.n_boots_est,
                                               self.n_supports_, n_coef)
+                intercepts = intercepts.reshape(self.n_boots_est, self.n_supports_)
                 scores = scores.reshape(self.n_boots_est, self.n_supports_)
                 self.rp_max_idx_ = np.argmax(scores, axis=1)
                 best_estimates = estimates[np.arange(self.n_boots_est),
@@ -434,6 +425,7 @@ class AbstractUoILinearModel(
                 self.coef_ = coef
                 self._fit_intercept(X, y)
             self.estimates_ = Bcast_from_root(estimates, self.comm, root=0)
+            self.intercepts_ = Bcast_from_root(intercepts, self.comm, root=0)
             self.scores_ = Bcast_from_root(scores, self.comm, root=0)
             self.coef_ = Bcast_from_root(coef, self.comm, root=0)
             self.intercept_ = Bcast_from_root(self.intercept_,
@@ -442,6 +434,7 @@ class AbstractUoILinearModel(
         else:
             self.estimates_ = estimates.reshape(self.n_boots_est,
                                                 self.n_supports_, n_coef)
+            self.intercepts_ = intercepts.reshape(self.n_boots_est, self.n_supports_)
             self.scores_ = scores.reshape(self.n_boots_est, self.n_supports_)
             self.rp_max_idx_ = np.argmax(self.scores_, axis=1)
             # extract the estimates over bootstraps from model with best
@@ -452,6 +445,53 @@ class AbstractUoILinearModel(
             self.coef_ = np.median(best_estimates,
                                    axis=0).reshape(self.output_dim, n_features)
             self._fit_intercept(X, y)
+
+
+    def fit(self, X, y, stratify=None, verbose=False):
+        """Fit data according to the UoI algorithm.
+
+        Parameters
+        ----------
+        X : ndarray or scipy.sparse matrix, (n_samples, n_features)
+            The design matrix.
+
+        y : ndarray, shape (n_samples,)
+            Response vector. Will be cast to X's dtype if necessary.
+            Currently, this implementation does not handle multiple response
+            variables.
+
+        stratify : array-like or None, default None
+            Ensures groups of samples are alloted to training/test sets
+            proportionally. Labels for each group must be an int greater
+            than zero. Must be of size equal to the number of samples, with
+            further restrictions on the number of groups.
+
+        verbose : boolean
+            A switch indicating whether the fitting should print out messages
+            displaying progress.
+
+        """
+        if verbose:
+            self._logger.setLevel(logging.DEBUG)
+        else:
+            self._logger.setLevel(logging.WARNING)
+
+        X, y = self._pre_fit(X, y)
+
+        X, y = check_X_y(X, y, accept_sparse=['csr', 'csc', 'coo'],
+                         y_numeric=True, multi_output=True)
+
+        # extract model dimensions
+        self.n_features = X.shape[1]
+
+        self.n_coef = self.get_n_coef(X, y)
+
+        # Selection module
+        self.selection(X, y, stratify, verbose)
+
+        # Estimation module
+        self.estimation(X, y, stratify, verbose)
+
         self._post_fit(X, y)
 
         return self
@@ -548,7 +588,7 @@ class AbstractUoILinearRegressor(
                 estimation_target = self._train_test_map[estimation_target]
         else:
             estimation_target = self._default_est_targets[estimation_score]
-        self._estimation_target = estimation_target
+        self.__estimation_target = estimation_target
 
     def _pre_fit(self, X, y):
         X, y = super()._pre_fit(X, y)
@@ -620,8 +660,8 @@ class AbstractUoILinearRegressor(
         """
 
         # Select the data relevant for the estimation_score
-        X = X[boot_idxs[self._estimation_target]]
-        y = y[boot_idxs[self._estimation_target]]
+        X = X[boot_idxs[self.__estimation_target]]
+        y = y[boot_idxs[self.__estimation_target]]
 
         if metric == 'r2':
 
@@ -629,7 +669,9 @@ class AbstractUoILinearRegressor(
 
             score = r2_score(y, y_pred)
         else:
+
             y_pred = fitter.predict(X[:, support])
+
             ll = utils.log_likelihood_glm(model='normal',
                                           y_true=y,
                                           y_pred=y_pred)
@@ -719,7 +761,7 @@ class AbstractUoIGeneralizedLinearRegressor(
         else:
             estimation_target = self._default_est_targets[estimation_score]
 
-        self._estimation_target = estimation_target
+        self.__estimation_target = estimation_target
 
     def _post_fit(self, X, y):
         super()._post_fit(X, y)
@@ -782,8 +824,8 @@ class AbstractUoIGeneralizedLinearRegressor(
         """
 
         # Select the data relevant for the estimation_score
-        X = X[boot_idxs[self._estimation_target]]
-        y = y[boot_idxs[self._estimation_target]]
+        X = X[boot_idxs[self.__estimation_target]]
+        y = y[boot_idxs[self.__estimation_target]]
 
         if metric == 'acc':
             if self.shared_support:
