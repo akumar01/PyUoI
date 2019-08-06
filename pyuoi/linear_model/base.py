@@ -334,7 +334,15 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
                     stratify=stratify,
                     random_state=self.random_state)
         
-        self.boots = my_boots
+        # Gather/record bootstrap indices
+        train_boots = np.array([my_boots[k][0] for k in my_boots.keys()])
+        test_boots = np.array([my_boots[k][1] for k in my_boots.keys()])
+
+        if self.comm is not None:
+            train_boots = Gatherv_rows(train_boots, comm=self.comm, root=0)
+            test_boots = Gatherv_rows(test_boots, comm=self.comm, root=0)
+            
+        self.boots = [train_boots, test_boots]
 
         # score (r2/AIC/AICc/BIC) for each bootstrap for each support
         scores = np.zeros(tasks.size)
