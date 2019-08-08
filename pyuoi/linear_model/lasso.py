@@ -12,8 +12,8 @@ from .base import AbstractUoILinearRegressor
 
 
 class PycLasso():
-    """Lasso using the pycasso solver. Solves for an entire regularization path
-    at once.
+    """Lasso using the pycasso solver. Solves for an
+    entire regularization path at once.
 
     Parameters
     ----------
@@ -170,6 +170,11 @@ class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
         pycasso path-wise solver.
 
 
+    solver : 'cd' | 'pyc'
+
+        If cd, will use sklearn's lasso implementation (via coordinate descent)
+        If pyc, will use pyclasso, built off of the pycasso path-wise solver
+
     Attributes
     ----------
     coef_ : nd-array, shape (n_features,) or (n_targets, n_features)
@@ -231,13 +236,12 @@ class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
 
         return [{'alpha': a} for a in alphas]
 
+    # Overwrite base class selection sweep to accommodate
+    # Pycasso path-wise solution
     def uoi_selection_sweep(self, X, y, reg_param_values):
-        """Overwrite base class selection sweep to accommodate pycasso
-        path-wise solution"""
 
         if self.solver == 'pyc':
-            alphas = np.array([reg_param['alpha']
-                               for reg_param in reg_param_values])
+            alphas = np.array([reg_param['alpha'] for reg_param in reg_param_values])
             self._selection_lm.set_params(alphas=alphas)
             self._selection_lm.fit(X, y)
 
