@@ -280,7 +280,6 @@ class AbstractUoILinearModel(
                 self._logger.info("selection bootstrap %d" % (boot_idx))
             selection_coefs[ii] = np.squeeze(
                 self.uoi_selection_sweep(X_rep, y_rep, my_reg_params))
-
         # if distributed, gather selection coefficients to 0,
         # perform intersection, and broadcast results
         if size > 1:
