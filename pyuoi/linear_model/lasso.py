@@ -1,7 +1,7 @@
 import numpy as np
 
 from sklearn.exceptions import NotFittedError
-from sklearn.linear_model import Lasso, LinearRegression
+from sklearn.linear_model import Lasso, LinearRegression, RidgeCV
 from sklearn.linear_model.coordinate_descent import _alpha_grid
 try:
     import pycasso
@@ -224,7 +224,8 @@ class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
                 fit_intercept=fit_intercept,
                 max_iter=max_iter)
 
-        self._estimation_lm = LinearRegression(fit_intercept=fit_intercept)
+        self._estimation_lm = RidgeCV(alphas = np.linspace(0.1, 10, 1000), fit_intercept=fit_intercept) 
+
 
     def get_reg_params(self, X, y):
         alphas = _alpha_grid(
