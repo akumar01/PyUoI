@@ -671,12 +671,6 @@ class AbstractUoILinearRegressor(AbstractUoILinearModel,
         if metric == 'r2':
             score = r2_score(y, y_pred)
         else:
-<<<<<<< HEAD
-=======
-
-            y_pred = fitter.predict(X[:, support])
-
->>>>>>> a branch forked off of resampling (itself should closely resemble AIC_fix) that keeps tracks of bootstraps and intercepts
             ll = utils.log_likelihood_glm(model='normal',
                                           y_true=y,
                                           y_pred=y_pred)
