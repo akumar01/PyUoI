@@ -1,7 +1,7 @@
 import numpy as np
 
 from sklearn.exceptions import NotFittedError
-from sklearn.linear_model import Lasso, LinearRegression
+from sklearn.linear_model import Lasso, LinearRegression, RidgeCV
 from sklearn.linear_model.coordinate_descent import _alpha_grid
 try:
     import pycasso
@@ -9,7 +9,6 @@ except ImportError:
     pycasso = None
 
 from .base import AbstractUoILinearRegressor
-
 
 class PycLasso():
     """Lasso using the pycasso solver. Solves for an entire regularization path
@@ -186,7 +185,7 @@ class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
                  warm_start=True, copy_X=True, fit_intercept=True,
                  standardize=True, max_iter=1000, random_state=None,
                  comm=None, logger=None,
-                 solver='cd'):
+                 solver='cd', estimation_method='ols'):
         super(UoI_Lasso, self).__init__(
             n_boots_sel=n_boots_sel,
             n_boots_est=n_boots_est,
@@ -218,8 +217,10 @@ class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
             self._selection_lm = PycLasso(
                 fit_intercept=fit_intercept,
                 max_iter=max_iter)
-
-        self._estimation_lm = LinearRegression(fit_intercept=fit_intercept)
+        if estimation_method == 'ols':
+            self._estimation_lm = LinearRegression(fit_intercept=fit_intercept)
+        elif estimation_method == 'l2':
+            self._estimation_lm = RidgeCV(alphas=np.linspace(0, 10, 100), fit_intercept=fit_intercept, cv=5)        
 
     def get_reg_params(self, X, y):
         alphas = _alpha_grid(
