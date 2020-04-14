@@ -82,9 +82,9 @@ class UoI_NCVR(AbstractUoILinearRegressor, LinearRegression):
         The logger to use for messages when ``verbose=True`` in ``fit``.
         If *None* is passed, a logger that writes to ``sys.stdout`` will be
         used.
-    penalty : string, 'scad' | 'mcp'
-        Fit with SCAD or MCP regularization. Non-convex regularization 
-        hyperparameter is fixed to a default constant in pyc.py
+    penalty : string, 'l1' | scad' | 'mcp'
+        Do selection with L1, SCAD or MCP regularization. Non-convex 
+        regularization hyperparameter is fixed to a default constant in pyc.py
 
     Attributes
     ----------
@@ -102,7 +102,7 @@ class UoI_NCVR(AbstractUoILinearRegressor, LinearRegression):
                  warm_start=True, copy_X=True, fit_intercept=True,
                  replace=False, standardize=True, max_iter=1000,
                  random_state=None, comm=None, logger=None,
-                 solver='scad'):
+                 penalty='scad'):
         super(UoI_NCVR, self).__init__(
             n_boots_sel=n_boots_sel,
             n_boots_est=n_boots_est,
