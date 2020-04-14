@@ -232,19 +232,32 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
             self._fit_intercept(X, y)
             self._post_fit(X, y)
             return self
+        else:
+            self.selection(X, y, stratify)
+            self.estimation(X, y, stratify)
+            self._post_fit(X, y)
 
+    def selection(self, X, y, stratify=None): 
         ####################
         # Selection Module #
         ####################
-        # choose the regularization parameters for selection sweep
-        self.reg_params_ = self.get_reg_params(X, y)
-        self.n_reg_params_ = len(self.reg_params_)
 
+
+        # extract model dimensions
+        n_features = X.shape[1]
+        n_coef = self.get_n_coef(X, y)
+
+        # Initialize comm parameters
         rank = 0
         size = 1
         if self.comm is not None:
             rank = self.comm.rank
             size = self.comm.size
+
+        # choose the regularization parameters for selection sweep
+        self.reg_params_ = self.get_reg_params(X, y)
+        self.n_reg_params_ = len(self.reg_params_)
+
 
         # initialize selection
         if size > self.n_boots_sel:
@@ -340,9 +353,22 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
         if rank == 0:
             self._logger.info("Found %d supports" % self.n_supports_)
 
-        #####################
-        # Estimation Module #
-        #####################
+
+    #####################
+    # Estimation Module #
+    #####################
+    def estimation(self, X, y, stratify=None):
+
+        # extract model dimensions
+        n_features = X.shape[1]
+        n_coef = self.get_n_coef(X, y)
+
+        rank = 0
+        size = 1
+        if self.comm is not None:
+            rank = self.comm.rank
+            size = self.comm.size
+
         # set up data arrays
         tasks = np.array_split(np.arange(self.n_boots_est *
                                          self.n_supports_), size)[rank]
@@ -452,9 +478,6 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
             self.coef_ = np.median(best_estimates,
                                    axis=0).reshape(self.output_dim, n_features)
             self._fit_intercept(X, y)
-        self._post_fit(X, y)
-
-        return self
 
     def uoi_selection_sweep(self, X, y, reg_param_values):
         """Perform selection regression on a dataset over a sweep of
