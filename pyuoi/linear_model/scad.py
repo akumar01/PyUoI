@@ -10,11 +10,11 @@ except ImportError:
 from .base import AbstractUoILinearRegressor
 from .pyc import PycWrapper
 
-class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
-    r"""UoI\ :sub:`Lasso` solver.
+class UoI_NCVR(AbstractUoILinearRegressor, LinearRegression):
+    r"""UoI\ :sub:`SCAD` or 'MCP' solver.
 
     Parameters
-    ----------
+     ----------
     n_boots_sel : int
         The number of data bootstraps/resamples to use in the selection module.
         Increasing this number will make selection more strict.
@@ -59,9 +59,11 @@ class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
         Whether to calculate the intercept for this model. If set
         to False, no intercept will be used in calculations
         (e.g. data is expected to be already centered).
+
     replace : boolean, deafult False
         Whether or not to sample with replacement when "bootstrapping"
         in selection/estimation modules
+
     standardize : boolean, default False
         If True, the regressors X will be standardized before regression by
         subtracting the mean and dividing by their standard deviations. This
@@ -80,11 +82,9 @@ class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
         The logger to use for messages when ``verbose=True`` in ``fit``.
         If *None* is passed, a logger that writes to ``sys.stdout`` will be
         used.
-    solver : string, 'cd' | 'pyc'
-        If cd, will use the ``scikit-learn`` lasso implementation (via
-        coordinate descent). If pyc, will use pyclasso, built off of the
-        pycasso path-wise solver.
-
+    penalty : string, 'l1' | scad' | 'mcp'
+        Do selection with L1, SCAD or MCP regularization. Non-convex 
+        regularization hyperparameter is fixed to a default constant in pyc.py
 
     Attributes
     ----------
@@ -102,8 +102,8 @@ class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
                  warm_start=True, copy_X=True, fit_intercept=True,
                  replace=False, standardize=True, max_iter=1000,
                  random_state=None, comm=None, logger=None,
-                 solver='cd'):
-        super(UoI_Lasso, self).__init__(
+                 penalty='scad'):
+        super(UoI_NCVR, self).__init__(
             n_boots_sel=n_boots_sel,
             n_boots_est=n_boots_est,
             selection_frac=selection_frac,
@@ -121,21 +121,12 @@ class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
             logger=logger)
         self.n_lambdas = n_lambdas
         self.eps = eps
-        self.solver = solver
-
-        if solver == 'cd':
-            self._selection_lm = Lasso(
-                max_iter=max_iter,
-                warm_start=warm_start,
-                random_state=random_state,
-                fit_intercept=fit_intercept)
-        elif solver == 'pyc':
-            if pycasso is None:
-                raise ImportError('pycasso is not installed.')
-            self._selection_lm = PycWrapper(
-                fit_intercept=fit_intercept,
-                max_iter=max_iter,
-                penalty='l1')
+        if pycasso is None:
+            raise ImportError('pycasso is not installed.')
+        self._selection_lm = PycWrapper(
+            fit_intercept=fit_intercept,
+            max_iter=max_iter,
+            penalty=penalty)
 
         self._estimation_lm = LinearRegression(fit_intercept=fit_intercept)
 
@@ -153,14 +144,10 @@ class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
         """Overwrite base class selection sweep to accommodate pycasso
         path-wise solution"""
 
-        if self.solver == 'pyc':
-            alphas = np.array([reg_param['alpha']
-                               for reg_param in reg_param_values])
+        alphas = np.array([reg_param['alpha']
+                           for reg_param in reg_param_values])
 
-            self._selection_lm.set_params(alphas=alphas)
-            self._selection_lm.fit(X, y)
+        self._selection_lm.set_params(alphas=alphas)
+        self._selection_lm.fit(X, y)
 
-            return self._selection_lm.coef_
-        else:
-            return super(UoI_Lasso, self).uoi_selection_sweep(X, y,
-                                                              reg_param_values)
+        return self._selection_lm.coef_

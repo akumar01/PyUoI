@@ -3,7 +3,7 @@ import numpy as np
 import logging
 from sklearn.linear_model.base import SparseCoefMixin
 from sklearn.metrics import r2_score, accuracy_score, log_loss
-from sklearn.utils import check_X_y
+from sklearn.utils import check_X_y, check_random_state
 from sklearn.preprocessing import StandardScaler
 
 from scipy.sparse import issparse, csr_matrix
@@ -36,7 +36,6 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
         bootstrap, during the estimation module. The remaining data is used
         to obtain validation scores. Small values of this parameters imply
         larger "perturbations" to the dataset.
-
     stability_selection : int, float, or array-like, default 1
         If int, treated as the number of bootstraps that a feature must
         appear in to guarantee placement in selection profile. If float,
@@ -45,16 +44,13 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
         between 0 and 1. In this case, each entry in the array-like object
         will act as a separate threshold for placement in the selection
         profile.
-
     fit_intercept : boolean, default True
         Whether to calculate the intercept for this model. If set
         to False, no intercept will be used in calculations
         (e.g. data is expected to be already centered).
-
     replace : boolean, deafult False
         Whether or not to sample with replacement when "bootstrapping"
         in selection/estimation modules
-
     standardize : boolean, default False
         If True, the regressors X will be standardized before regression by
         subtracting the mean and dividing by their standard deviations.
@@ -87,7 +83,6 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
         Boolean array indicating whether a given regressor (column) is selected
         for estimation for a given regularization parameter value (row).
     """
-
     def __init__(self, n_boots_sel=24, n_boots_est=24, selection_frac=0.9,
                  estimation_frac=0.9, stability_selection=1.,
                  fit_intercept=True, replace=False, standardize=True,
@@ -108,20 +103,8 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
         self.max_iter = max_iter
         self.comm = comm
 
-        # Properly assign a RandomState instance to this fitter
-        if random_state is None:
-            self.random_state = np.random.RandomState()
-        elif isinstance(random_state, int):
-            # make sure ranks use different seed
-            if self.comm is not None:
-                random_state += self.comm.rank
-            self.random_state = np.random.RandomState(random_state)
-        elif isinstance(random_state, np.random.RandomState):
-            self.random_state = random_state
-        else:
-            raise ValueError("Invalid type for random_state. Must be an integer"
-                             "np.random.RandomState instance or NoneType")
-
+        self.random_state = check_random_state(random_state)
+        
         # extract selection thresholds from user provided stability selection
         self.selection_thresholds_ = stability_selection_to_threshold(
             self.stability_selection, self.n_boots_sel)
@@ -232,19 +215,32 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
             self._fit_intercept(X, y)
             self._post_fit(X, y)
             return self
+        else:
+            self.selection(X, y, stratify)
+            self.estimation(X, y, stratify)
+            self._post_fit(X, y)
 
+    def selection(self, X, y, stratify=None): 
         ####################
         # Selection Module #
         ####################
-        # choose the regularization parameters for selection sweep
-        self.reg_params_ = self.get_reg_params(X, y)
-        self.n_reg_params_ = len(self.reg_params_)
 
+
+        # extract model dimensions
+        n_features = X.shape[1]
+        n_coef = self.get_n_coef(X, y)
+
+        # Initialize comm parameters
         rank = 0
         size = 1
         if self.comm is not None:
             rank = self.comm.rank
             size = self.comm.size
+
+        # choose the regularization parameters for selection sweep
+        self.reg_params_ = self.get_reg_params(X, y)
+        self.n_reg_params_ = len(self.reg_params_)
+
 
         # initialize selection
         if size > self.n_boots_sel:
@@ -340,9 +336,22 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
         if rank == 0:
             self._logger.info("Found %d supports" % self.n_supports_)
 
-        #####################
-        # Estimation Module #
-        #####################
+
+    #####################
+    # Estimation Module #
+    #####################
+    def estimation(self, X, y, stratify=None):
+
+        # extract model dimensions
+        n_features = X.shape[1]
+        n_coef = self.get_n_coef(X, y)
+
+        rank = 0
+        size = 1
+        if self.comm is not None:
+            rank = self.comm.rank
+            size = self.comm.size
+
         # set up data arrays
         tasks = np.array_split(np.arange(self.n_boots_est *
                                          self.n_supports_), size)[rank]
@@ -452,9 +461,6 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
             self.coef_ = np.median(best_estimates,
                                    axis=0).reshape(self.output_dim, n_features)
             self._fit_intercept(X, y)
-        self._post_fit(X, y)
-
-        return self
 
     def uoi_selection_sweep(self, X, y, reg_param_values):
         """Perform selection regression on a dataset over a sweep of

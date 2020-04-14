@@ -20,7 +20,7 @@ import numpy as np
 
 from .base import AbstractUoIGeneralizedLinearRegressor
 from ..utils import sigmoid, softmax
-from ..lbfgs import fmin_lbfgs, AllZeroLBFGSError
+# from ..lbfgs import fmin_lbfgs, AllZeroLBFGSError
 
 
 class UoI_L1Logistic(AbstractUoIGeneralizedLinearRegressor, LogisticRegression):

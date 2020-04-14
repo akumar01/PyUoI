@@ -13,7 +13,7 @@ except ImportError:
     pycasso = None
 
 from pyuoi import UoI_Lasso
-from pyuoi.linear_model.lasso import PycLasso
+from pyuoi.linear_model.pyc import PycWrapper
 from pyuoi.datasets import make_linear_regression
 
 
@@ -265,7 +265,7 @@ def test_choice_of_solver():
     assert(isinstance(uoi1._selection_lm, Lasso))
 
     uoi2 = UoI_Lasso(solver='pyc')
-    assert(isinstance(uoi2._selection_lm, PycLasso))
+    assert(isinstance(uoi2._selection_lm, PycWrapper))
 
 
 @pytest.mark.skipif(pycasso is not None, reason='pycasso is installed')
@@ -275,14 +275,14 @@ def test_pycasso_error():
 
     with pytest.raises(ImportError):
         uoi2 = UoI_Lasso(solver='pyc')
-        assert(isinstance(uoi2._selection_lm, PycLasso))
+        assert(isinstance(uoi2._selection_lm, PycWrapper))
 
 
 @pytest.mark.skipif(pycasso is None, reason='pycasso not installed')
 def test_pyclasso():
     """Tests whether the PycLasso class is working"""
 
-    pyclasso = PycLasso(fit_intercept=False, max_iter=1000)
+    pyclasso = PycWrapper(fit_intercept=False, max_iter=1000)
 
     # Test that we can set params correctly
     pyclasso.set_params(fit_intercept=True)

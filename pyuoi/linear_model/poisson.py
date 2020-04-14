@@ -8,7 +8,7 @@ from sklearn.base import BaseEstimator
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.validation import check_is_fitted
 
-from ..lbfgs import fmin_lbfgs
+# from ..lbfgs import fmin_lbfgs
 
 
 class Poisson(BaseEstimator):
