@@ -59,11 +59,9 @@ class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
         Whether to calculate the intercept for this model. If set
         to False, no intercept will be used in calculations
         (e.g. data is expected to be already centered).
-
     replace : boolean, deafult False
         Whether or not to sample with replacement when "bootstrapping"
         in selection/estimation modules
-
     standardize : boolean, default False
         If True, the regressors X will be standardized before regression by
         subtracting the mean and dividing by their standard deviations. This
