@@ -1,16 +1,8 @@
-import numpy as np
+import numpy as np 
+from .lasso import UoI_Lasso
+from .ncvr import UoI_NCVR
 
-from sklearn.exceptions import NotFittedError
-from sklearn.linear_model import Lasso, LinearRegression
-from sklearn.linear_model.coordinate_descent import _alpha_grid
-try:
-    import pycasso
-except ImportError:
-    pycasso = None
-from .base import AbstractUoILinearRegressor
-from .pyc import PycWrapper
-
-class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
+class VAR():
     r"""UoI\ :sub:`Lasso` solver.
 
     Parameters
@@ -98,48 +90,15 @@ class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
         boolean array indicating whether a given regressor (column) is selected
         for estimation for a given regularization parameter value (row).
     """
-    def __init__(self, n_boots_sel=24, n_boots_est=24, selection_frac=0.9,
-                 estimation_frac=0.9, n_lambdas=48, stability_selection=1.,
-                 estimation_score='BIC', estimation_target=None, eps=1e-3,
-                 warm_start=True, copy_X=True, fit_intercept=True,
-                 replace=False, standardize=True, max_iter=1000,
-                 random_state=None, comm=None, logger=None,
-                 solver='cd'):
-        super(UoI_Lasso, self).__init__(
-            n_boots_sel=n_boots_sel,
-            n_boots_est=n_boots_est,
-            selection_frac=selection_frac,
-            estimation_frac=estimation_frac,
-            estimation_target=estimation_target,
-            stability_selection=stability_selection,
-            copy_X=copy_X,
-            fit_intercept=fit_intercept,
-            replace=replace,
-            standardize=standardize,
-            random_state=random_state,
-            comm=comm,
-            estimation_score=estimation_score,
-            max_iter=max_iter,
-            logger=logger)
-        self.n_lambdas = n_lambdas
-        self.eps = eps
-        self.solver = solver
+    def __init__(self, estimator='l1', random_state=None,
+                 comm=None, **uoi_kwargs):
 
-        if solver == 'cd':
-            self._selection_lm = Lasso(
-                max_iter=max_iter,
-                warm_start=warm_start,
-                random_state=random_state,
-                fit_intercept=fit_intercept)
-        elif solver == 'pyc':
-            if pycasso is None:
-                raise ImportError('pycasso is not installed.')
-            self._selection_lm = PycWrapper(
-                fit_intercept=fit_intercept,
-                max_iter=max_iter,
-                penalty='l1')
-
-        self._estimation_lm = LinearRegression(fit_intercept=fit_intercept)
+    	if estimator == 'l1':
+    		self.estimator = UoILasso(comm=comm, random_state=random_state,
+    								  **uoi_kwargs)
+    	else:
+    		self.estimator = UoI_NCVR(comm=comm, random_state=random_state,
+    								  **uoi_kwargs)
 
     def get_reg_params(self, X, y):
         alphas = _alpha_grid(
