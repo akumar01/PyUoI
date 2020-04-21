@@ -34,7 +34,8 @@ def resample(type, x, replace=True, random_state=None, **kwargs):
     if type == 'bootstrap':
         train_idxs, test_idxs = bootstrap(x, random_state, replace, **kwargs)
     elif type == 'block':
-        train_idxs, test_idxs = block_bootstrap(x, random_state, **kwargs)
+        train_idxs = block_bootstrap(x, random_state, **kwargs)
+        test_idxs = np.empty()
 
     return [train_idxs, test_idxs]
 
@@ -113,7 +114,6 @@ def block_bootstrap(x, rand_state, L, block_frac):
 	Returns
 	-------
 	train_idxs: ndarray, shape (n_train_samples, n_features)
-	test_idxs: ndarray, shape (n_test_samples, n_features)
     """    
     n = len(x)
 
@@ -132,11 +132,4 @@ def block_bootstrap(x, rand_state, L, block_frac):
     for idx in selected_blocks:
         train_idxs.extend(blocks[idx])
 
-    # Take the complement of the selected blocks
-    # and stitch those together to give "test data"
-    test_blocks = np.setdiff1d(np.arange(len(blocks)), selected_blocks)
-    train_idxs = []
-    for idx in selected_blocks:
-        train_idxs.extend(blocks[idx])
-
-    return train_idxs, test_idxs
+    return train_idxs

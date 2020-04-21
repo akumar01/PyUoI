@@ -3,7 +3,7 @@ from .base import AbstractUoILinearRegressor
 from .ncvr import UoI_NCVR
 
 
-class VAR(UoI_NCVR, AbstractUoILinearRegressor):
+class VAR(UoI_NCV, AbstractUoILinearRegressor):
     r"""UoI\ :sub:`VAR` solver.
 
     Parameters
@@ -34,12 +34,7 @@ class VAR(UoI_NCVR, AbstractUoILinearRegressor):
         return resample('block', idxs, self.replace, self.random_state,
                         sampling_frac=sampling_frac, stratify=stratify)
 
-    def fit(y):
-        """
-            Overall default UoI fit
-            y: ndarray of shape (n_samples, n_dof)
-        """
-
+    def form_VAR(y):
         n_samples, n_features = y.shape
 
         # Preallocate
@@ -53,10 +48,14 @@ class VAR(UoI_NCVR, AbstractUoILinearRegressor):
         # Reshape
         X = np.reshape(X, (n_samples, -1))
 
+
+    def fit(y):
+        """
+            Overall default UoI fit
+            y: ndarray of shape (n_samples, n_dof)
+        """
+        X, y = self.form_VAR(y)
+
         # Feed into normal fit. Will have try different normalization
         # strategies eventually
         super(VAR, self).fit(X, y)
-
-        
-
-
