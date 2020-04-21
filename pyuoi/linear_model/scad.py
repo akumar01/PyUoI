@@ -10,7 +10,7 @@ except ImportError:
 from .base import AbstractUoILinearRegressor
 from .pyc import PycWrapper
 
-class UoI_NCVR(AbstractUoILinearRegressor, LinearRegression):
+class UoI_NCV(AbstractUoILinearRegressor, LinearRegression):
     r"""UoI\ :sub:`SCAD` or 'MCP' solver.
 
     Parameters
@@ -59,11 +59,9 @@ class UoI_NCVR(AbstractUoILinearRegressor, LinearRegression):
         Whether to calculate the intercept for this model. If set
         to False, no intercept will be used in calculations
         (e.g. data is expected to be already centered).
-
     replace : boolean, deafult False
         Whether or not to sample with replacement when "bootstrapping"
         in selection/estimation modules
-
     standardize : boolean, default False
         If True, the regressors X will be standardized before regression by
         subtracting the mean and dividing by their standard deviations. This
@@ -103,7 +101,7 @@ class UoI_NCVR(AbstractUoILinearRegressor, LinearRegression):
                  replace=False, standardize=True, max_iter=1000,
                  random_state=None, comm=None, logger=None,
                  penalty='scad'):
-        super(UoI_NCVR, self).__init__(
+        super(UoI_NCV, self).__init__(
             n_boots_sel=n_boots_sel,
             n_boots_est=n_boots_est,
             selection_frac=selection_frac,
