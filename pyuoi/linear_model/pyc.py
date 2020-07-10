@@ -1,4 +1,7 @@
 import numpy as np
+from sklearn.model_selection import KFold
+import pdb
+
 
 try:
     import pycasso
@@ -52,25 +55,30 @@ class PycWrapper():
             else:
                 raise ValueError('Invalid parameter %s' % key)
 
-    def predict(self, X):
+    def predict(self, X, fold=None):
         """Predicts responses given a design matrix.
 
         Parameters
         ----------
         X : ndarray, (n_samples, n_features)
             The design matrix.
-
+        fold: int, optional
+            If used as a cross-validated estimator, then predict using 
+            the model associated with the fold integer
         Returns
         -------
         y : ndarray, shape (n_samples,)
             Predicted response vector.
         """
         if self.isfitted:
-            return np.matmul(X, self.coef_.T) + self.intercept_
+            if fold is not None:
+                return np.matmul(X, self.coef_[fold, ...].T) + self.intercept_[fold, :]
+            else:
+                return np.matmul(X, self.coef_.T) + self.intercept_
         else:
             raise NotFittedError('Estimator is not fit.')
 
-    def fit(self, X, y):
+    def fit(self, X, y, cross_validate=False):
         """Fit data according to the pycasso object.
 
         Parameters
@@ -81,6 +89,8 @@ class PycWrapper():
             Response vector. Will be cast to X's dtype if necessary.
             Currently, this implementation does not handle multiple response
             variables.
+        cross_validate : bool
+            Whether or not we should fit the data across folds
         """
         if self.alphas is None:
             raise Exception('Set alphas before fitting.')
@@ -88,30 +98,56 @@ class PycWrapper():
         # Sort in descending order
         self.alphas = np.sort(self.alphas)[::-1]
 
-        # Pycasso requires the regularization path to include at
-        # least 3 regularization parameters.
-        dummy_path = False
-        if self.alphas.size < 3:
-            dummy_path = True
-            alphas = list(self.alphas)
-            pathlength = len(alphas)
-            while len(alphas) < 3:
-                alphas.append(alphas[-1] / 2)
-            self.alphas = np.array(alphas)
+        if cross_validate:
+            kfold =  KFold(n_splits=5)
+            coefs = np.zeros((5, self.alphas.size, X.shape[1]))
+            intercepts = np.zeros((5, self.alphas.size))
+            test_idxs = []
+            fold_idx = 0
+            for train, test in kfold.split(X, y):
+                Xtrain = X[train]
+                ytrain = y[train]
+                # No dummy path support for cross-validation
+                solver = pycasso.Solver(Xtrain, ytrain, family='gaussian',
+                                        useintercept=self.fit_intercept,
+                                        lambdas=self.alphas,
+                                        penalty=self.penalty,
+                                        gamma=self.gamma,
+                                        max_ite=self.max_iter)
 
-        self.solver = pycasso.Solver(X, y, family='gaussian',
-                                     useintercept=self.fit_intercept,
-                                     lambdas=self.alphas,
-                                     penalty=self.penalty,
-                                     gamma=self.gamma,
-                                     max_ite=self.max_iter)
-        self.solver.train()
-
-        if dummy_path:
-            self.coef_ = self.solver.result['beta'][0:pathlength, :]
-            self.intercept_ = self.solver.result['intercept'][0:pathlength]
+                solver.train()
+                coefs[fold_idx, ...] = solver.result['beta']
+                intercepts[fold_idx, :] = solver.result['intercept']
+                fold_idx += 1
+                test_idxs.append(test)
+            self.coef_ = coefs
+            self.intercept_ = intercepts
+            self.test_folds = test_idxs
         else:
-            self.coef_ = self.solver.result['beta']
-            self.intercept_ = self.solver.result['intercept']
+            # Pycasso requires the regularization path to include at
+            # least 3 regularization parameters.
+            dummy_path = False
+            if self.alphas.size < 3:
+                dummy_path = True
+                alphas = list(self.alphas)
+                pathlength = len(alphas)
+                while len(alphas) < 3:
+                    alphas.append(alphas[-1] / 2)
+                self.alphas = np.array(alphas)
+
+            self.solver = pycasso.Solver(X, y, family='gaussian',
+                                         useintercept=self.fit_intercept,
+                                         lambdas=self.alphas,
+                                         penalty=self.penalty,
+                                         gamma=self.gamma,
+                                         max_ite=self.max_iter)
+            self.solver.train()
+
+            if dummy_path:
+                self.coef_ = self.solver.result['beta'][0:pathlength, :]
+                self.intercept_ = self.solver.result['intercept'][0:pathlength]
+            else:
+                self.coef_ = self.solver.result['beta']
+                self.intercept_ = self.solver.result['intercept']
 
         self.isfitted = True

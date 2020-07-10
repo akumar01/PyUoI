@@ -7,7 +7,7 @@ try:
     import pycasso
 except ImportError:
     pycasso = None
-from .base import AbstractUoILinearRegressor
+from .base import AbstractUoILinearRegressor, OLS_Wrapper
 from .pyc import PycWrapper
 
 class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
@@ -82,11 +82,6 @@ class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
         The logger to use for messages when ``verbose=True`` in ``fit``.
         If *None* is passed, a logger that writes to ``sys.stdout`` will be
         used.
-    solver : string, 'cd' | 'pyc'
-        If cd, will use the ``scikit-learn`` lasso implementation (via
-        coordinate descent). If pyc, will use pyclasso, built off of the
-        pycasso path-wise solver.
-
 
     Attributes
     ----------
@@ -103,8 +98,7 @@ class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
                  estimation_score='BIC', estimation_target=None, eps=1e-3,
                  warm_start=True, copy_X=True, fit_intercept=True,
                  replace=False, standardize=True, max_iter=1000,
-                 random_state=None, comm=None, logger=None,
-                 solver='cd'):
+                 random_state=None, comm=None, logger=None):
         super(UoI_Lasso, self).__init__(
             n_boots_sel=n_boots_sel,
             n_boots_est=n_boots_est,
@@ -123,23 +117,14 @@ class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
             logger=logger)
         self.n_lambdas = n_lambdas
         self.eps = eps
-        self.solver = solver
 
-        if solver == 'cd':
-            self._selection_lm = Lasso(
-                max_iter=max_iter,
-                warm_start=warm_start,
-                random_state=random_state,
-                fit_intercept=fit_intercept)
-        elif solver == 'pyc':
-            if pycasso is None:
-                raise ImportError('pycasso is not installed.')
-            self._selection_lm = PycWrapper(
-                fit_intercept=fit_intercept,
-                max_iter=max_iter,
-                penalty='l1')
+        self._selection_lm = Lasso(
+            max_iter=max_iter,
+            warm_start=warm_start,
+            random_state=random_state,
+            fit_intercept=fit_intercept)
 
-        self._estimation_lm = LinearRegression(fit_intercept=fit_intercept)
+        self._estimation_lm = OLS_Wrapper(fit_intercept=fit_intercept)
 
     def get_reg_params(self, X, y):
         alphas = _alpha_grid(
@@ -150,19 +135,3 @@ class UoI_Lasso(AbstractUoILinearRegressor, LinearRegression):
             n_alphas=self.n_lambdas)
 
         return [{'alpha': a} for a in alphas]
-
-    def uoi_selection_sweep(self, X, y, reg_param_values):
-        """Overwrite base class selection sweep to accommodate pycasso
-        path-wise solution"""
-
-        if self.solver == 'pyc':
-            alphas = np.array([reg_param['alpha']
-                               for reg_param in reg_param_values])
-
-            self._selection_lm.set_params(alphas=alphas)
-            self._selection_lm.fit(X, y)
-
-            return self._selection_lm.coef_
-        else:
-            return super(UoI_Lasso, self).uoi_selection_sweep(X, y,
-                                                              reg_param_values)
