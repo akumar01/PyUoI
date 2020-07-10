@@ -7,7 +7,7 @@ try:
     import pycasso
 except ImportError:
     pycasso = None
-from .base import AbstractUoILinearRegressor
+from .base import AbstractUoILinearRegressor, OLS_Wrapper
 from .pyc import PycWrapper
 
 class UoI_NCV(AbstractUoILinearRegressor, LinearRegression):
@@ -126,7 +126,7 @@ class UoI_NCV(AbstractUoILinearRegressor, LinearRegression):
             max_iter=max_iter,
             penalty=penalty)
 
-        self._estimation_lm = LinearRegression(fit_intercept=fit_intercept)
+        self._estimation_lm = OLS_Wrapper(fit_intercept=fit_intercept)
 
     def get_reg_params(self, X, y):
         alphas = _alpha_grid(

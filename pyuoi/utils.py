@@ -48,6 +48,13 @@ def log_likelihood_glm(model, y_true, y_pred):
     ll : float
         The log-likelihood.
     """
+
+    # If y_true is of a different size than y_pred, trim away the beginning 
+    # of y_true (used in autoregressive models)
+
+    if y_true.size > y_pred.size:
+        y_true = y_true[y_true.size - y_pred.size:]
+
     if model == 'normal':
         # this log-likelihood is calculated under the assumption that the
         # variance is the value that maximizes the log-likelihood
@@ -152,3 +159,143 @@ def check_logger(logger, name='uoi', comm=None):
         handler.setFormatter(logging.Formatter(fmt))
         ret.addHandler(handler)
     return ret
+
+'''
+    selection_accuracy
+        beta: ndarray (n_models, n_features) or (n_features,)
+        beta_hat : ndarray (n_models, n_features)
+        threshold: Ignore magnitudes less than 1e-6
+        sign_consistent: Assess whether correctly selected coefficients have the
+        the right sign
+'''
+def selection_accuracy(beta, beta_hat, threshold = False, sign_consistent=False):
+
+    beta, beta_hat = tile_beta(beta, beta_hat)
+
+    if threshold:
+        beta_hat[beta_hat < 1e-6] = 0
+
+    selection_accuracy = np.zeros(beta_hat.shape[0])
+    for i in range(beta_hat.shape[0]):
+        b = beta[i, :].squeeze()
+        bhat = beta_hat[i, :].squeeze()
+
+        # Define support sets in terms of indices
+        Sb = set(np.nonzero(b)[0].tolist())
+        Sbhat = set(np.nonzero(bhat)[0].tolist())
+
+        normalization = len(Sb) + len(Sbhat)
+        # This will only occur if both sb and sbhat are all 0, in which 
+        # case setting the normalization to 0 will give the intuitive result
+        # (perfect selection accuracy)
+        if normalization == 0:
+            normalization = 1
+
+        # If requiring sign consistency, need to define set intersection
+        # in a sign consistent way
+        if sign_consistent:
+            selection_accuracy[i] = 1 - float(len(sign_consistent_set_diff(Sb, Sbhat, b, bhat)))\
+                                    /float(normalization)            
+        else:
+
+            selection_accuracy[i] = 1 - \
+            float(len((Sb.difference(Sbhat)).union(Sbhat.difference(Sb))))\
+            /float(normalization)
+    return selection_accuracy
+
+
+def sign_consistent_set_diff(S, Shat, b, bhat):
+
+    # Treat incorrect signs as false negatives
+
+    # Treat incorrect signs as false negatives
+    common_support = list(S.intersection(Shat))
+
+    incorrect_signs = [idx for idx in common_support 
+                           if np.sign(b[idx]) != np.sign(bhat[idx])]
+
+    # Remove incorrect signs from Shat
+    for idx in incorrect_signs:
+        Shat.remove(idx)
+
+    # Now take the symmetric set difference
+    return (S.difference(Shat)).union(Shat.difference(S))
+
+# Calculate estimation error
+# Do so using only the overlap of the estimated and true support sets
+def estimation_error(beta, beta_hat, threshold = False):
+    beta, beta_hat = tile_beta(beta, beta_hat)
+
+    if threshold:
+        beta_hat[beta_hat < 1e-6] = 0
+
+    ee = np.zeros(beta_hat.shape[0])
+    median_ee = np.zeros(beta_hat.shape[0])
+
+    for i in range(beta_hat.shape[0]):
+        b = beta[i, :].squeeze()
+        bhat = beta_hat[i, :].squeeze()
+
+        common_support = np.bitwise_and(b != 0, bhat != 0)
+        p = bhat[common_support].size
+        if p > 0:
+            median_ee[i] = np.median(np.sqrt(np.power(b[common_support] - \
+                                        bhat[common_support], 2)))
+            ee[i] = 1/p * np.sqrt(np.sum(np.power(b[common_support] - \
+                                  bhat[common_support], 2)))
+        else:
+            median_ee[i] = np.nan
+            ee[i] = np.nan
+
+    return ee, median_ee
+
+
+# Calculate the estimation error, separately measuring the contribution
+# from selection mismatch (magnitude of false negatives + false positives)
+# and estimatione rror (magnitude of error in correctly selected for coefficients)
+def stratified_estimation_error(beta, beta_hat, threshold = False):
+    beta, beta_hat = tile_beta(beta, beta_hat)
+
+    if threshold:
+        beta_hat[beta_hat < 1e-6] = 0
+
+    fn_ee = np.zeros(beta_hat.shape[0])
+    fp_ee = np.zeros(beta_hat.shape[0])
+    estimation_ee = np.zeros(beta_hat.shape[0])
+
+    for i in range(beta_hat.shape[0]):
+        b = beta[i, :].squeeze()
+        bhat = beta_hat[i, :].squeeze()
+
+        common_support = np.bitwise_and(b != 0, bhat != 0)
+
+        zerob = bhat[(b == 0)].ravel()
+        false_positives = zerob[np.nonzero(zerob)]
+
+        zerobhat = b[(bhat == 0).ravel()]
+        false_negatives = zerobhat[np.nonzero(zerobhat)]
+        fn_ee[i] = np.sum(np.abs(false_negatives))
+        fp_ee[i] = np.sum(np.abs(false_positives))
+        p = bhat[common_support].size
+        if p > 0:
+            estimation_ee[i] = np.sqrt(np.sum(np.power(b[common_support] - \
+                                  bhat[common_support], 2)))
+        else:
+            estimation_ee[i] = 0
+
+    return fn_ee, fp_ee, estimation_ee
+
+
+def tile_beta(beta, beta_hat):
+
+    if np.ndim(beta_hat) == 1:
+        beta_hat = beta_hat[np.newaxis, :]
+
+    if np.ndim(beta) == 1:
+        beta = beta[np.newaxis, :]
+
+    if beta.shape != beta_hat.shape:
+        beta = np.tile(beta, [int(beta_hat.shape[0]/beta.shape[0]), 1])
+
+    return beta, beta_hat
+

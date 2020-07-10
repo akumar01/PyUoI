@@ -35,9 +35,10 @@ def resample(type, x, replace=True, random_state=None, **kwargs):
         train_idxs, test_idxs = bootstrap(x, random_state, replace, **kwargs)
     elif type == 'block':
         train_idxs = block_bootstrap(x, random_state, **kwargs)
-        test_idxs = np.empty()
+        # Return dummy test_idxs for backwards compatibility
+        test_idxs = train_idxs
 
-    return [train_idxs, test_idxs]
+    return train_idxs, test_idxs
 
 
 def bootstrap(x, rand_state, replace, sampling_frac=0.9, stratify=None):
@@ -97,7 +98,7 @@ def bootstrap(x, rand_state, replace, sampling_frac=0.9, stratify=None):
     return train_idxs, test_idxs
 
 
-def block_bootstrap(x, rand_state, L, block_frac):
+def block_bootstrap(x, rand_state, L):
     r"""Use a moving block bootstrap for resampling in VAR models. See
 	'The jackknife and the bootstrap for general stationary observations'
 	by Hans Kunsch, Annals of Statistics 1989, Vol 17, No. 3, 1217-1241		
@@ -122,7 +123,7 @@ def block_bootstrap(x, rand_state, L, block_frac):
     for i in range(x.size - L + 1):
         blocks.append(x[i:i + L])
 
-    n_sampled_blocks = int(np.round(len(blocks) * block_frac))
+    n_sampled_blocks = int(x.size/L)
     selected_blocks = rand_state.choice(len(blocks),
                                         size=n_sampled_blocks,
                                         replace=True)

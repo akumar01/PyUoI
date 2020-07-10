@@ -76,7 +76,12 @@ class Poisson(BaseEstimator):
         sample_weight : array-like, shape (n_samples,)
             Array of weights assigned to the individual samples. If ``None``,
             then each sample is provided an equal weight.
+        coef_mask : boolean array-like, shape (n_features,)
+            Mask to sparsify the features prior to regression. If ``None``,
+            all features are regressed against.
         """
+
+        X = X[:, coef_mask]
         self.n_samples, self.n_features = X.shape
         X, y = self._pre_fit(X, y)
 

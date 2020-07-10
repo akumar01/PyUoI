@@ -1,11 +1,11 @@
 import abc as _abc
 import numpy as np
 import logging
+from sklearn.linear_model import LinearRegression
 from sklearn.linear_model.base import SparseCoefMixin
 from sklearn.metrics import r2_score, accuracy_score, log_loss
 from sklearn.utils import check_X_y, check_random_state
 from sklearn.preprocessing import StandardScaler
-
 from scipy.sparse import issparse, csr_matrix
 
 from pyuoi import utils
@@ -15,6 +15,7 @@ from pyuoi.mpi_utils import (Gatherv_rows, Bcast_from_root)
 from .utils import stability_selection_to_threshold, intersection
 from ..utils import check_logger
 
+import pdb
 
 class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
     r"""An abstract base class for UoI ``linear_model`` classes.
@@ -56,7 +57,7 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
         subtracting the mean and dividing by their standard deviations.
     shared_support : bool
         For models with more than one output (multinomial logistic regression)
-        this determines whether all outputs share the same support or can
+        this  determines whether all outputs share the same support or can
         have independent supports.
     max_iter : int
         Maximum number of iterations for iterative fitting methods.
@@ -104,7 +105,7 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
         self.comm = comm
 
         self.random_state = check_random_state(random_state)
-        
+
         # extract selection thresholds from user provided stability selection
         self.selection_thresholds_ = stability_selection_to_threshold(
             self.stability_selection, self.n_boots_sel)
@@ -206,7 +207,7 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
                          y_numeric=True, multi_output=True)
 
         # extract model dimensions
-        n_features = X.shape[1]
+        n_features = self.get_n_features(X)
         n_coef = self.get_n_coef(X, y)
 
         # check if the response variable is constant
@@ -225,9 +226,7 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
         # Selection Module #
         ####################
 
-
         # extract model dimensions
-        n_features = X.shape[1]
         n_coef = self.get_n_coef(X, y)
 
         # Initialize comm parameters
@@ -307,9 +306,9 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
 
             else:
                 self._logger.info("selection bootstrap %d" % (boot_idx))
+
             selection_coefs[ii] = np.squeeze(
                 self.uoi_selection_sweep(X_rep, y_rep, my_reg_params))
-
         # if distributed, gather selection coefficients to 0,
         # perform intersection, and broadcast results
         if size > 1:
@@ -343,7 +342,7 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
     def estimation(self, X, y, stratify=None):
 
         # extract model dimensions
-        n_features = X.shape[1]
+        n_features = self.get_n_features(X)
         n_coef = self.get_n_coef(X, y)
 
         rank = 0
@@ -374,7 +373,7 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
             else:
                 my_boots[boot] = self._resample(
                     np.arange(X.shape[0]),
-                    sampling_frac=self.selection_frac,
+                    sampling_frac=self.estimation_frac,
                     stratify=stratify)
 
         # score (r2/AIC/AICc/BIC) for each bootstrap for each support
@@ -395,9 +394,10 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
 
                 # compute the estimate and store the fitted coefficients
                 if self.shared_support:
-                    self._estimation_lm.fit(X_rep[:, support], y_rep)
+                    self._estimation_lm.fit(X_rep, y_rep, coef_mask=support)
                     estimates[ii, np.tile(support, self.output_dim)] = \
                         self._estimation_lm.coef_.ravel()
+
                 else:
                     self._estimation_lm.fit(X_rep, y_rep, coef_mask=support)
                     estimates[ii] = self._estimation_lm.coef_.ravel()
@@ -504,6 +504,12 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
         This should return the shape of X.
         """
         return X.shape[1] * self.output_dim
+
+    def get_n_features(self, X):
+        """Return the number of features. For basic regression this 
+        is just the second dimension of X
+        """
+        return X.shape[1]
 
 
 class AbstractUoILinearRegressor(AbstractUoILinearModel,
@@ -623,6 +629,7 @@ class AbstractUoILinearRegressor(AbstractUoILinearModel,
         """
 
         # Select the data relevant for the estimation_score
+
         X = X[boot_idxs[self._estimation_target]]
         y = y[boot_idxs[self._estimation_target]]
 
@@ -635,7 +642,8 @@ class AbstractUoILinearRegressor(AbstractUoILinearModel,
             raise ValueError('y should either have shape ' +
                              '(n_samples, ) or (n_samples, 1).')
 
-        y_pred = fitter.predict(X[:, support])
+        y, y_pred = fitter.predict(X, y, coef_mask=support)
+
         if y.shape != y_pred.shape:
             raise ValueError('Targets and predictions are not the same shape.')
 
@@ -679,10 +687,27 @@ class LinearInterceptFitterNoFeatures(object):
     def __init__(self, y):
         self.intercept_ = y.mean()
 
-    def predict(self, X):
+    def predict(self, X, y, coef_mask):
         n_samples = X.shape[0]
-        return np.tile(self.intercept_, n_samples)
+        return y, np.tile(self.intercept_, n_samples)
 
+class OLS_Wrapper(LinearRegression):
+
+    def fit(self, X, y, coef_mask=None):
+
+        if coef_mask is not None:
+            X = X[:, coef_mask]
+
+        super(OLS_Wrapper, self).fit(X, y)
+
+    def predict(self, X, y, coef_mask=None):
+
+        if coef_mask is not None:
+            X = X[:, coef_mask]
+
+        y_pred = super(OLS_Wrapper, self).predict(X)
+
+        return y, y_pred
 
 class AbstractUoIGeneralizedLinearRegressor(AbstractUoILinearModel,
                                             metaclass=_abc.ABCMeta):
