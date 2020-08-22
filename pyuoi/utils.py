@@ -1,7 +1,7 @@
 import numpy as np
 import sys
 import logging
-
+import pdb
 
 def softmax(y, axis=-1):
     """Calculates the softmax distribution.
@@ -168,9 +168,9 @@ def check_logger(logger, name='uoi', comm=None):
         sign_consistent: Assess whether correctly selected coefficients have the
         the right sign
 '''
-def selection_accuracy(beta, beta_hat, threshold = False, sign_consistent=False):
+def selection_accuracy(beta, beta_hat, threshold = False, sign_consistent=False, var=False):
 
-    beta, beta_hat = tile_beta(beta, beta_hat)
+    beta, beta_hat = tile_beta(beta, beta_hat, var=var)
 
     if threshold:
         beta_hat[beta_hat < 1e-6] = 0
@@ -223,8 +223,8 @@ def sign_consistent_set_diff(S, Shat, b, bhat):
 
 # Calculate estimation error
 # Do so using only the overlap of the estimated and true support sets
-def estimation_error(beta, beta_hat, threshold = False):
-    beta, beta_hat = tile_beta(beta, beta_hat)
+def estimation_error(beta, beta_hat, threshold = False, var=False):
+    beta, beta_hat = tile_beta(beta, beta_hat, var=var)
 
     if threshold:
         beta_hat[beta_hat < 1e-6] = 0
@@ -253,8 +253,8 @@ def estimation_error(beta, beta_hat, threshold = False):
 # Calculate the estimation error, separately measuring the contribution
 # from selection mismatch (magnitude of false negatives + false positives)
 # and estimatione rror (magnitude of error in correctly selected for coefficients)
-def stratified_estimation_error(beta, beta_hat, threshold = False):
-    beta, beta_hat = tile_beta(beta, beta_hat)
+def stratified_estimation_error(beta, beta_hat, threshold = False, var=False):
+    beta, beta_hat = tile_beta(beta, beta_hat, var=var)
 
     if threshold:
         beta_hat[beta_hat < 1e-6] = 0
@@ -286,7 +286,13 @@ def stratified_estimation_error(beta, beta_hat, threshold = False):
     return fn_ee, fp_ee, estimation_ee
 
 
-def tile_beta(beta, beta_hat):
+def tile_beta(beta, beta_hat, var=False):
+
+    if var:
+        # Ravel VAR matrices into a vector for compatibility in estimation error
+        # and selection accuracy checks
+        beta = beta.reshape((-1, np.prod(beta.shape[-3:])))
+        beta_hat = beta_hat.reshape((-1, np.prod(beta_hat.shape[-3:])))
 
     if np.ndim(beta_hat) == 1:
         beta_hat = beta_hat[np.newaxis, :]

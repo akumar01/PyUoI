@@ -35,8 +35,9 @@ class VAR():
         for estimation for a given regularization parameter value (row).
     """
     def __init__(self, order=1, random_state=None, penalty='l1', 
-                 estimator='uoi', **estimator_kwargs):
+                 estimator='uoi', self_regress=False, **estimator_kwargs):
         self.order = order
+        self.self_regress = self_regress
         self.random_state = check_random_state(random_state)
         if estimator == 'uoi':
             self.estimator = UoIVAR_Estimator(penalty=penalty, order=self.order, 
@@ -53,11 +54,16 @@ class VAR():
 
     def fit(self, y):
         """
-            Overall default UoI fit
             y: ndarray of shape (n_samples, n_dof)
+               or (n_trials, n_samples, n_dof)
         """
 
-        n_samples, n_dof = y.shape
+        if y.ndim == 2:
+            n_samples, n_dof = y.shape
+        elif y.ndim == 3:
+            n_trials, n_samples, n_dof = y.shape
+        else:
+            raise ValueError('Shape of y must be either (n_samples, n_dof) or (n_trials, n_samples, n_dof)')
 
         # Statistics to track
         self.intercept_ = np.zeros(n_dof)
@@ -67,17 +73,33 @@ class VAR():
         # Regress each column (feature) against all the others
         for i in range(n_dof):
 
-            xx, yy = form_lag_matrix(y, self.order, y[:, i])
+            # If allowed to self regress, include the past history 
+            # of the feature of interest
+            if self.self_regress:
+                xx, yy = form_lag_matrix(y, self.order, y[..., i])
+            else:
+                xx, yy = form_lag_matrix(y[..., np.arange(n_dof) != i], self.order, y[..., i])                
+
             self.estimator.fit(xx, yy)
 
-            coefs = np.reshape(self.estimator.coef_, (self.order, n_dof)).T
-            self.coef_[i, ...] = np.fliplr(coefs)
 
+            if self.self_regress:
+                coefs = np.reshape(self.estimator.coef_, (self.order, n_dof)).T
+            else:
+                coefs = np.zeros((self.order, n_dof))
+                coefs[:, np.arange(n_dof) != i] = np.reshape(self.estimator.coef_, 
+                                                             (self.order, n_dof - 1))
+                coefs = coefs.T
+
+            self.coef_[i, ...] = np.fliplr(coefs)
             if hasattr(self.estimator, 'intercept_'):
                 self.intercept_[i] = self.estimator.intercept_
             if hasattr(self.estimator, 'scores_'):
                 self.scores_.append(self.estimator.scores_) 
 
+
+        # Re-order coefficients so model order comes first
+        self.coef_ = np.transpose(self.coef_, axes=(2, 0, 1))
         # # Re-order coefficients so AR(1) coefficient comes first in
         # # the last axis
         # self.coef_ = np.transpose(self.coef_, axes=(1, 0, 2))
@@ -250,7 +272,6 @@ class VAR_OLS_Wrapper(LinearRegression):
                                               copy_X=copy_X,
                                               n_jobs=n_jobs)
 
-
     def fit(self, X, y, coef_mask=None):
         n_features = X.shape[1]
         if coef_mask is not None:
@@ -272,8 +293,31 @@ class VAR_OLS_Wrapper(LinearRegression):
 
         return y, y_pred
 
+def form_lag_matrix(X, T, y=None, stride=1, stride_tricks=True,
+                    writeable=False):
+    
+    if X.ndim == 2:
+        return _form_lag_matrix(X, T, y=y, stride=stride, stride_tricks=stride_tricks,
+                                writeable=writeable)
+    elif X.ndim == 3:
+        if y is not None and y.ndim !=2:
+            raise ValueError('y passed in with non-standard dimension.')
+        # Separately lag each trial and then concatenate
+        xx = []
+        yy = []
+        for i in range(X.shape[0]):
+            xxlag, yylag = _form_lag_matrix(X[i, ...], T, y=y[i, ...], stride=stride, 
+                                            stride_tricks=stride_tricks,
+                                            writeable=writeable) 
+            xx.append(xxlag)
+            yy.append(yylag)
 
-def form_lag_matrix(X, T, y=None, stride=1, stride_tricks=True, 
+        xx = np.concatenate(xx)
+        yy = np.concatenate(yy)
+
+        return xx, yy
+
+def _form_lag_matrix(X, T, y=None, stride=1, stride_tricks=True, 
                     writeable=False):
     """Form the data matrix with `T` lags.
 
@@ -299,6 +343,8 @@ def form_lag_matrix(X, T, y=None, stride=1, stride_tricks=True,
     X_with_lags : ndarray (n_lagged_time, N * T)
         Timeseries with lags.
     """
+
+
     if not isinstance(stride, int) or stride < 1:
         raise ValueError('stride should be an int and greater than or equal to 1.')
     N = X.shape[1]
