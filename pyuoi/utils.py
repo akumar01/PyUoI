@@ -52,8 +52,8 @@ def log_likelihood_glm(model, y_true, y_pred):
     # If y_true is of a different size than y_pred, trim away the beginning 
     # of y_true (used in autoregressive models)
 
-    if y_true.size > y_pred.size:
-        y_true = y_true[y_true.size - y_pred.size:]
+    if y_true.shape[0] > y_pred.shape[0]:
+        y_true = y_true[y_true.shape[0] - y_pred.shape[0]:]
 
     if model == 'normal':
         # this log-likelihood is calculated under the assumption that the

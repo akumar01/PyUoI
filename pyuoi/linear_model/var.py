@@ -111,8 +111,8 @@ class VAR():
         y_pred = np.zeros((y.shape[0] - self.order, y.shape[1]))
 
         for i in range(y_pred.shape[0]):
-            y_pred[i, :] = np.sum(np.vstack([y[i + self.order - j - 1] @ self.coef_[..., j] 
-                                  for j in range(self.coef_.shape[-1])]), axis=0)
+            y_pred[i, :] = np.sum(np.vstack([y[i + self.order - j - 1] @ self.coef_[j, ...] 
+                                  for j in range(self.coef_.shape[0])]), axis=0)
         # # Return a trimmed version of y for proper comparison with y_pred
         return y_pred, y[self.order:]
 
