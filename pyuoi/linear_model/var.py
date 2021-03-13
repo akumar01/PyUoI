@@ -10,6 +10,8 @@ from .base import AbstractUoILinearRegressor
 from .ncv import UoI_NCV
 from .pyc import PycWrapper
 
+from mpi_utils.ndarray import Gatherv_rows
+
 from numpy.lib.stride_tricks import as_strided
 
 import pdb
@@ -71,6 +73,7 @@ class VAR():
 
         # Spread each row across mpi tasks
         if self.comm is not None:
+            comm = self.comm
             size = comm.Get_size()
             ranks = np.arange(size)
             rank = comm.rank
@@ -103,7 +106,7 @@ class VAR():
 
                 coefs.append(np.fliplr(coefs_))
                 if hasattr(self.estimator, 'intercept_'):
-                    intercept[i] = self.estimator.intercept_
+                    intercept[idx] = self.estimator.intercept_
                 if hasattr(self.estimator, 'scores_'):
                     scores.append(self.estimator.scores_) 
 
