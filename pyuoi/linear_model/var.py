@@ -35,10 +35,12 @@ class VAR():
         for estimation for a given regularization parameter value (row).
     """
     def __init__(self, order=1, random_state=None, penalty='l1', 
-                 estimator='uoi', self_regress=False, **estimator_kwargs):
+                 estimator='uoi', self_regress=False, 
+                 comm=None, **estimator_kwargs):
         self.order = order
         self.self_regress = self_regress
         self.random_state = check_random_state(random_state)
+        self.comm = comm
         if estimator == 'uoi':
             self.estimator = UoIVAR_Estimator(penalty=penalty, order=self.order, 
                                               random_state=self.random_state, 
@@ -65,37 +67,86 @@ class VAR():
         else:
             raise ValueError('Shape of y must be either (n_samples, n_dof) or (n_trials, n_samples, n_dof)')
 
-        # Statistics to track
-        self.intercept_ = np.zeros(n_dof)
-        self.coef_ = np.zeros((n_dof, n_dof, self.order))
-        self.scores_ = []
-
         # Regress each column (feature) against all the others
-        for i in range(n_dof):
 
-            # If allowed to self regress, include the past history 
-            # of the feature of interest
-            if self.self_regress:
-                xx, yy = form_lag_matrix(y, self.order, y[..., i])
-            else:
-                xx, yy = form_lag_matrix(y[..., np.arange(n_dof) != i], self.order, y[..., i])                
+        # Spread each row across mpi tasks
+        if self.comm is not None:
+            size = comm.Get_size()
+            ranks = np.arange(size)
+            rank = comm.rank
+            task_list = np.array_split(np.arange(n_dof), size)[comm.rank]
+            num_tasks = len(task_list)
 
-            self.estimator.fit(xx, yy)
+            scores = []
+            coefs = []
+
+            intercept = np.zeros(num_tasks)
+
+            for idx, i in enumerate(task_list):
+                # If allowed to self regress, include the past history 
+                # of the feature of interest
+                if self.self_regress:
+                    xx, yy = form_lag_matrix(y, self.order, y[..., i])
+                else:
+                    xx, yy = form_lag_matrix(y[..., np.arange(n_dof) != i], self.order, y[..., i])                
+
+                self.estimator.fit(xx, yy)
 
 
-            if self.self_regress:
-                coefs = np.reshape(self.estimator.coef_, (self.order, n_dof)).T
-            else:
-                coefs = np.zeros((self.order, n_dof))
-                coefs[:, np.arange(n_dof) != i] = np.reshape(self.estimator.coef_, 
-                                                             (self.order, n_dof - 1))
-                coefs = coefs.T
+                if self.self_regress:
+                    coefs_ = np.reshape(self.estimator.coef_, (self.order, n_dof)).T
+                else:
+                    coefs_ = np.zeros((self.order, n_dof))
+                    coefs_[:, np.arange(n_dof) != i] = np.reshape(self.estimator.coef_, 
+                                                                  (self.order, n_dof - 1))
+                    coefs_ = coefs_.T
 
-            self.coef_[i, ...] = np.fliplr(coefs)
-            if hasattr(self.estimator, 'intercept_'):
-                self.intercept_[i] = self.estimator.intercept_
-            if hasattr(self.estimator, 'scores_'):
-                self.scores_.append(self.estimator.scores_) 
+                coefs.append(np.fliplr(coefs_))
+                if hasattr(self.estimator, 'intercept_'):
+                    intercept[i] = self.estimator.intercept_
+                if hasattr(self.estimator, 'scores_'):
+                    scores.append(self.estimator.scores_) 
+
+            coefs = np.array(coefs)
+            scores = np.array(scores)[np.newaxis, :]
+
+            # Gather coefficients
+            self.coef_ = Gatherv_rows(coefs, comm, root=0)
+            self.scores_ = Gatherv_rows(scores, comm, root=0)
+
+
+        else:
+
+            # Statistics to track
+            self.intercept_ = np.zeros(n_dof)
+            self.coef_ = np.zeros((n_dof, n_dof, self.order))
+            self.scores_ = []
+
+            for i in range(n_dof):
+
+                # If allowed to self regress, include the past history 
+                # of the feature of interest
+                if self.self_regress:
+                    xx, yy = form_lag_matrix(y, self.order, y[..., i])
+                else:
+                    xx, yy = form_lag_matrix(y[..., np.arange(n_dof) != i], self.order, y[..., i])                
+
+                self.estimator.fit(xx, yy)
+
+
+                if self.self_regress:
+                    coefs = np.reshape(self.estimator.coef_, (self.order, n_dof)).T
+                else:
+                    coefs = np.zeros((self.order, n_dof))
+                    coefs[:, np.arange(n_dof) != i] = np.reshape(self.estimator.coef_, 
+                                                                 (self.order, n_dof - 1))
+                    coefs = coefs.T
+
+                self.coef_[i, ...] = np.fliplr(coefs)
+                if hasattr(self.estimator, 'intercept_'):
+                    self.intercept_[i] = self.estimator.intercept_
+                if hasattr(self.estimator, 'scores_'):
+                    self.scores_.append(self.estimator.scores_) 
 
 
         # Re-order coefficients so model order comes first
