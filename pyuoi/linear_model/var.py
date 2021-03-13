@@ -111,12 +111,15 @@ class VAR():
                     scores.append(self.estimator.scores_) 
 
             coefs = np.array(coefs)
-            scores = np.array(scores)[np.newaxis, :]
+            scores = np.array(scores)
 
             # Gather coefficients
             self.coef_ = Gatherv_rows(coefs, comm, root=0)
             self.scores_ = Gatherv_rows(scores, comm, root=0)
 
+            if comm.rank == 0:
+                # Re-order coefficients so model order comes first
+                self.coef_ = np.transpose(self.coef_, axes=(2, 0, 1))
 
         else:
 
@@ -152,8 +155,8 @@ class VAR():
                     self.scores_.append(self.estimator.scores_) 
 
 
-        # Re-order coefficients so model order comes first
-        self.coef_ = np.transpose(self.coef_, axes=(2, 0, 1))
+            # Re-order coefficients so model order comes first
+            self.coef_ = np.transpose(self.coef_, axes=(2, 0, 1))
         # # Re-order coefficients so AR(1) coefficient comes first in
         # # the last axis
         # self.coef_ = np.transpose(self.coef_, axes=(1, 0, 2))
