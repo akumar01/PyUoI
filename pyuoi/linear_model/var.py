@@ -4,17 +4,19 @@ from sklearn.utils import check_X_y, check_random_state
 from sklearn.linear_model import LinearRegression
 from sklearn.linear_model.coordinate_descent import _alpha_grid
 from sklearn.metrics import r2_score
+from sklearn.preprocessing import StandardScaler
 from pyuoi.resampling import resample
 from pyuoi.utils import log_likelihood_glm, BIC
 from .base import AbstractUoILinearRegressor
 from .ncv import UoI_NCV
 from .pyc import PycWrapper
 
-from mpi_utils.ndarray import Gatherv_rows
+from pyuoi.mpi_utils import Gatherv_rows
 
 from numpy.lib.stride_tricks import as_strided
 
 import pdb
+import time
 
 class VAR():
     r"""UoI\ :sub:`VAR` solver.
@@ -44,15 +46,15 @@ class VAR():
         self.random_state = check_random_state(random_state)
         self.comm = comm
         if estimator == 'uoi':
-            self.estimator = UoIVAR_Estimator(penalty=penalty, order=self.order, 
+            self.estimator = UoIVAR_Estimator(penalty=penalty, 
                                               random_state=self.random_state, 
                                               **estimator_kwargs)
         elif estimator == 'ncv':
-            self.estimator = NCV_VAR_Estimator(penalty=penalty, order=self.order,
+            self.estimator = NCV_VAR_Estimator(penalty=penalty,
                                                random_state=self.random_state,
                                                **estimator_kwargs)
         elif estimator == 'ols':
-            self.estimator = VAR_OLS_Wrapper(order=self.order, standalone=True,
+            self.estimator = VAR_OLS_Wrapper(standalone=True,
                                              **estimator_kwargs)
 
 
@@ -95,7 +97,6 @@ class VAR():
 
                 self.estimator.fit(xx, yy)
 
-
                 if self.self_regress:
                     coefs_ = np.reshape(self.estimator.coef_, (self.order, n_dof)).T
                 else:
@@ -128,17 +129,11 @@ class VAR():
             self.coef_ = np.zeros((n_dof, n_dof, self.order))
             self.scores_ = []
 
+            XX, YY = _form_var_problem(y, self.order, self.self_regress)
+
             for i in range(n_dof):
 
-                # If allowed to self regress, include the past history 
-                # of the feature of interest
-                if self.self_regress:
-                    xx, yy = form_lag_matrix(y, self.order, y[..., i])
-                else:
-                    xx, yy = form_lag_matrix(y[..., np.arange(n_dof) != i], self.order, y[..., i])                
-
-                self.estimator.fit(xx, yy)
-
+                self.estimator.fit(XX[i], YY[i])
 
                 if self.self_regress:
                     coefs = np.reshape(self.estimator.coef_, (self.order, n_dof)).T
@@ -183,21 +178,19 @@ class VAR():
 
 class UoIVAR_Estimator(UoI_NCV):
 
-    def __init__(self, penalty, order, random_state, fit_intercept=False,
+    def __init__(self, penalty, random_state, fit_intercept=False,
                  fit_type='union_only', resample_type='fixed_order', L=None,
                  **uoi_kwargs):
         
-        self.order = order
         self.fit_type = fit_type
         self.resample_type = resample_type
         self.L = L
         self.fit_type = fit_type
         super(UoIVAR_Estimator, self).__init__(penalty=penalty,
-                                            random_state=random_state,
-                                            **uoi_kwargs)
+                                               random_state=random_state,
+                                               **uoi_kwargs)
 
-        self._estimation_lm = VAR_OLS_Wrapper(fit_intercept=fit_intercept,
-                                              order=order)
+        self._estimation_lm = VAR_OLS_Wrapper(fit_intercept=fit_intercept)
 
     def _resample(self, idxs, *args, **kwargs):
         """Modify default resampling behavior"""
@@ -207,7 +200,7 @@ class UoIVAR_Estimator(UoI_NCV):
         elif self.resample_type == 'block':
             return resample('block', idxs, replace=True, 
                             random_state=self.random_state,
-                            L=self.L)
+                                   L=self.L)
 
     def _fit_intercept(self, X, y):
 
@@ -243,7 +236,6 @@ class UoIVAR_Estimator(UoI_NCV):
                 alphas = _alpha_grid(X, y)
                 reg_param_values = [{'alpha': alpha} for alpha in alphas]
                 coefs = self.uoi_selection_sweep(X, y, reg_param_values)
-
                 self.supports_ = coefs.astype(bool)
                 self.n_supports_ = self.supports_.shape[0]                
                 self.estimation(X, y)
@@ -252,10 +244,9 @@ class UoIVAR_Estimator(UoI_NCV):
 
 class NCV_VAR_Estimator(PycWrapper):
 
-    def __init__(self, order, random_state, alphas=None, fit_intercept=False, 
+    def __init__(self, random_state=None, alphas=None, fit_intercept=False, 
                  max_iter=1000, penalty='l1', selection_method='BIC'): 
 
-        self.order = order
         self.random_state = random_state
 
         if selection_method == 'CV':
@@ -268,13 +259,17 @@ class NCV_VAR_Estimator(PycWrapper):
         super(NCV_VAR_Estimator, self).__init__(alphas=alphas, fit_intercept=fit_intercept, 
                                                 max_iter=max_iter, penalty=penalty)
     def fit(self, X, y):
+        # Standardize by default
+        X_scaler = StandardScaler(with_mean=self.fit_intercept)
+        X = X_scaler.fit_transform(X)
+        y_scaler = StandardScaler(with_mean=self.fit_intercept)
+        y = y_scaler.fit_transform(y.reshape(-1, 1))
 
-        if self.alphas is None:
-            alphas = _alpha_grid(X, y)
-            self.set_params(alphas=alphas)
+        alphas = _alpha_grid(X, y)
+        self.set_params(alphas=alphas)
 
         super(NCV_VAR_Estimator, self).fit(X, y, cross_validate=self.cross_validate)
-
+        self.all_coef = self.coef_
         self.select(X, y)
 
     def select(self, X, y):
@@ -284,11 +279,9 @@ class NCV_VAR_Estimator(PycWrapper):
             n_models = self.coef_.shape[0]
             scores = np.zeros(n_models)
             y_pred = self.predict(X)
-
             for model_idx in range(n_models):
                 ll = log_likelihood_glm('normal', y, y_pred[:, model_idx])
-                scores[model_idx] = BIC(ll, X.shape[0], X.shape[1])
-
+                scores[model_idx] = BIC(ll, X.shape[0], X.shape[1]) 
             self.scores_ = scores
             self.coef_ = self.coef_[np.argmin(scores), :]
             self.intercept_ = self.intercept_[np.argmin(scores)]
@@ -319,13 +312,12 @@ class NCV_VAR_Estimator(PycWrapper):
 
 class VAR_OLS_Wrapper(LinearRegression):
 
-    def __init__(self, order, fit_intercept=False, normalize=False, 
+    def __init__(self, fit_intercept=False, normalize=False, 
                  copy_X=True, n_jobs=None, standalone=False):
 
-        self.order = order
         self.standalone = standalone
         super(VAR_OLS_Wrapper, self).__init__(fit_intercept=fit_intercept,
-                                              normalize=normalize, 
+                                              normalize=normalize,  
                                               copy_X=copy_X,
                                               n_jobs=n_jobs)
 
@@ -427,3 +419,20 @@ def _form_lag_matrix(X, T, y=None, stride=1, stride_tricks=True,
 
     return X_with_lags, y
 
+# Given a time series, return a sequence of regression problems 
+def _form_var_problem(y, T, self_regress=False):
+
+    XX = []
+    YY = []
+
+    for i in range(y.shape[-1]):
+
+        if self_regress:
+            xx, yy = form_lag_matrix(y, T, y[..., i])
+        else:
+            xx, yy = form_lag_matrix(y[..., np.arange(y.shape[-1]) != i], T, y[..., i])                
+
+        XX.append(xx)
+        YY.append(yy)
+
+    return XX, YY

@@ -95,7 +95,7 @@ class UoI_NCV(AbstractUoILinearRegressor, LinearRegression):
         for estimation for a given regularization parameter value (row).
     """
     def __init__(self, n_boots_sel=24, n_boots_est=24, selection_frac=0.9,
-                 estimation_frac=0.9, n_lambdas=48, stability_selection=1.,
+                 estimation_frac=0.9, n_lambdas=100, stability_selection=1.,
                  estimation_score='BIC', estimation_target=None, eps=1e-3,
                  warm_start=True, copy_X=True, fit_intercept=True,
                  replace=False, standardize=True, max_iter=1000,
