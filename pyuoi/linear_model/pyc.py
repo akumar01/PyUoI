@@ -67,14 +67,17 @@ class PycWrapper():
             the model associated with the fold integer
         Returns
         -------
-        y : ndarray, shape (n_samples,)
-            Predicted response vector.
+        y : ndarray, shape (n_samples, n_reg_params)
+            Predicted response vector for each regularization strength
         """
         if self.isfitted:
             if fold is not None:
                 return np.matmul(X, self.coef_[fold, ...].T) + self.intercept_[fold, :]
             else:
-                return np.matmul(X, self.coef_.T) + self.intercept_
+                y = np.zeros((X.shape[0], self.coef_.shape[0]))
+                for i in range(self.coef_.shape[0]):
+                    y[:, i] = X @ self.coef_[i, :] + self.intercept_[i]
+                return y
         else:
             raise NotFittedError('Estimator is not fit.')
 
