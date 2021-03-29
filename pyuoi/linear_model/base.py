@@ -1,8 +1,15 @@
 import abc as _abc
 import numpy as np
 import logging
+import sklearn
 from sklearn.linear_model import LinearRegression
-from sklearn.linear_model.base import SparseCoefMixin
+
+from packaging import version
+if version.parse(sklearn.__version__) >= version.parse('0.22.1'):
+    from sklearn.linear_model._base import SparseCoefMixin
+else:
+    from sklearn.linear_model.base import SparseCoefMixin
+
 from sklearn.metrics import r2_score, accuracy_score, log_loss
 from sklearn.utils import check_X_y, check_random_state
 from sklearn.preprocessing import StandardScaler
