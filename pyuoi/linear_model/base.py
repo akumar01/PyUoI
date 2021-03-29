@@ -10,6 +10,7 @@ if version.parse(sklearn.__version__) >= version.parse('0.22.1'):
 else:
     from sklearn.linear_model.base import SparseCoefMixin
 
+from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score, accuracy_score, log_loss
 from sklearn.utils import check_X_y, check_random_state
 from sklearn.preprocessing import StandardScaler
