@@ -88,6 +88,7 @@ class VAR():
             intercept = np.zeros(num_tasks)
 
             for idx, i in enumerate(task_list):
+                print('Rank %d working on task %d' % (rank, i))
                 # If allowed to self regress, include the past history 
                 # of the feature of interest
                 if self.self_regress:
