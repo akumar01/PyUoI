@@ -2,7 +2,7 @@ import numpy as np
 from scipy.signal import convolve
 from sklearn.utils import check_X_y, check_random_state
 from sklearn.linear_model import LinearRegression
-from sklearn.linear_model.coordinate_descent import _alpha_grid
+from sklearn.linear_model._coordinate_descent import _alpha_grid
 from sklearn.metrics import r2_score
 from sklearn.preprocessing import StandardScaler
 from pyuoi.resampling import resample
