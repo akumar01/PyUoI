@@ -11,12 +11,39 @@ from .base import AbstractUoILinearRegressor
 from .ncv import UoI_NCV
 from .pyc import PycWrapper
 
+from mpi4py import MPI
 from pyuoi.mpi_utils import Gatherv_rows
 
 from numpy.lib.stride_tricks import as_strided
 
 import pdb
 import time
+
+# Tiered communicators
+def comm_setup(comm, ncomms):
+
+    if comm is not None:
+        rank = comm.rank
+        numproc = comm.Get_size()
+
+        ranks = np.arange(numproc)
+        split_ranks = np.array_split(ranks, ncomms)
+        color = [i for i in np.arange(ncomms) if rank in split_ranks[i]][0]
+        subcomm_roots = [split_ranks[i][0] for i in np.arange(ncomms)]
+
+        subcomm = comm.Split(color, rank)
+
+        # Setup a root communicator that links the roots of each subcomm
+        global_group = comm.Get_group()
+        root_group = MPI.Group.Incl(global_group, subcomm_roots)
+        roots_comm = comm.Create(root_group)
+    else:
+        subcomm = None
+        roots_comm = None
+        color = None
+
+    return comm, subcomm, roots_comm, color
+
 
 class VAR():
     r"""UoI\ :sub:`VAR` solver.
@@ -40,14 +67,23 @@ class VAR():
     """
     def __init__(self, order=1, random_state=None, penalty='l1', 
                  estimator='uoi', self_regress=False, 
-                 comm=None, **estimator_kwargs):
+                 comm=None, ncomms=1, **estimator_kwargs):
         self.order = order
         self.self_regress = self_regress
         self.random_state = check_random_state(random_state)
         self.comm = comm
+        self.ncomms = ncomms
+
+        comm, subcomm, rootcomm, color = comm_setup(self.comm, self.ncomms)
+
+        self.subcomm = subcomm
+        self.rootcomm = rootcomm
+        self.color = color
+
         if estimator == 'uoi':
             self.estimator = UoIVAR_Estimator(penalty=penalty, 
                                               random_state=self.random_state, 
+                                              comm = self.subcomm,
                                               **estimator_kwargs)
         elif estimator == 'ncv':
             self.estimator = NCV_VAR_Estimator(penalty=penalty,
@@ -73,13 +109,10 @@ class VAR():
 
         # Regress each column (feature) against all the others
 
-        # Spread each row across mpi tasks
+        # Spread each row across mpi tasks. If ncomms is > 1, we also spread
+        # estimation of each row
         if self.comm is not None:
-            comm = self.comm
-            size = comm.Get_size()
-            ranks = np.arange(size)
-            rank = comm.rank
-            task_list = np.array_split(np.arange(n_dof), size)[comm.rank]
+            task_list = np.array_split(np.arange(n_dof), self.ncomms)[self.color]
             num_tasks = len(task_list)
 
             scores = []
@@ -88,7 +121,7 @@ class VAR():
             intercept = np.zeros(num_tasks)
 
             for idx, i in enumerate(task_list):
-                print('Rank %d working on task %d' % (rank, i))
+                print('Rank %d working on task %d' % (self.comm.rank, i))
                 # If allowed to self regress, include the past history 
                 # of the feature of interest
                 if self.self_regress:
@@ -115,11 +148,12 @@ class VAR():
             coefs = np.array(coefs)
             scores = np.array(scores)
 
-            # Gather coefficients
-            self.coef_ = Gatherv_rows(coefs, comm, root=0)
-            self.scores_ = Gatherv_rows(scores, comm, root=0)
+            # Gather coefficients onto the root subcomm
+            if self.subcomm.rank == 0:
+                self.coef_ = Gatherv_rows(coefs, self.rootcomm, root=0)
+                self.scores_ = Gatherv_rows(scores, self.rootcomm, root=0)
 
-            if comm.rank == 0:
+            if self.comm.rank == 0:
                 # Re-order coefficients so model order comes first
                 self.coef_ = np.transpose(self.coef_, axes=(2, 0, 1))
 
@@ -217,31 +251,13 @@ class UoIVAR_Estimator(UoI_NCV):
 
         if self.fit_type == 'uoi':
             super(UoIVAR_Estimator, self).fit(X, y)
+        elif self.fit_type == 'union_only':
+            # Set n_boots_sel to 1 and the seletion_frac to 1 to do an ordinary fit
+            self.n_boots_sel = 1
+            self.selection_frac = 1.
+            super(UoIVAR_Estimator, self).fit(X, y)
         else:
-            X, y = self._pre_fit(X, y)
-            self.output_dim = 1
-            X, y = check_X_y(X, y, accept_sparse=['csr', 'csc', 'coo'],
-                             y_numeric=True, multi_output=True)
-
-            # extract model dimensions
-            n_features = self.get_n_features(X)
-            n_coef = self.get_n_coef(X, y)
-
-            # check if the response variable is constant
-            if np.unique(y).size == 1:
-                self.coef_ = np.zeros((self.output_dim, n_features))
-                self._fit_intercept(X, y)
-                self._post_fit(X, y)
-                return self
-            else:            
-                alphas = _alpha_grid(X, y)
-                reg_param_values = [{'alpha': alpha} for alpha in alphas]
-                coefs = self.uoi_selection_sweep(X, y, reg_param_values)
-                self.supports_ = coefs.astype(bool)
-                self.n_supports_ = self.supports_.shape[0]                
-                self.estimation(X, y)
-                # self._post_fit(X, y)
-
+            raise ValueError('Unknown fit type')
 
 class NCV_VAR_Estimator(PycWrapper):
 

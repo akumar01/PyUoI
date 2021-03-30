@@ -3,7 +3,6 @@ from collections import Counter
 from sklearn.model_selection import train_test_split
 from sklearn.utils import check_random_state
 
-
 def resample(type, x, replace=True, random_state=None, **kwargs):
     r"""Takes the data in X and y and returns the appropriate
     resampled versions.
@@ -89,11 +88,14 @@ def bootstrap(x, rand_state, replace, sampling_frac=0.9, stratify=None):
             test_idxs = np.setdiff1d(np.arange(len(x)), train_idxs)
 
     else:
-
-        train_idxs, test_idxs = train_test_split(x, train_size=sampling_frac,
-                                                 test_size=1 - sampling_frac,
-                                                 random_state=rand_state,
-                                                 stratify=stratify)
+        if sampling_frac == 1:
+            train_idxs = np.arange(x.shape[0])
+            test_idxs = np.array([])
+        else:
+            train_idxs, test_idxs = train_test_split(x, train_size=sampling_frac,
+                                                     test_size=1 - sampling_frac,
+                                                     random_state=rand_state,
+                                                     stratify=stratify)
 
     return train_idxs, test_idxs
 
