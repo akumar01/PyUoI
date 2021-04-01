@@ -10,6 +10,8 @@ except ImportError:
 from .base import AbstractUoILinearRegressor, OLS_Wrapper
 from .pyc import PycWrapper
 
+import pdb
+
 class UoI_NCV(AbstractUoILinearRegressor, LinearRegression):
     r"""UoI\ :sub:`SCAD` or 'MCP' solver.
 
@@ -141,7 +143,6 @@ class UoI_NCV(AbstractUoILinearRegressor, LinearRegression):
     def uoi_selection_sweep(self, X, y, reg_param_values):
         """Overwrite base class selection sweep to accommodate pycasso
         path-wise solution"""
-
         alphas = np.array([reg_param['alpha']
                            for reg_param in reg_param_values])
 

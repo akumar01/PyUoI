@@ -119,17 +119,12 @@ class VAR():
             coefs = []
 
             intercept = np.zeros(num_tasks)
+            XX, YY = _form_var_problem(y, self.order, self.self_regress)
 
             for idx, i in enumerate(task_list):
                 print('Rank %d working on task %d' % (self.comm.rank, i))
-                # If allowed to self regress, include the past history 
-                # of the feature of interest
-                if self.self_regress:
-                    xx, yy = form_lag_matrix(y, self.order, y[..., i])
-                else:
-                    xx, yy = form_lag_matrix(y[..., np.arange(n_dof) != i], self.order, y[..., i])                
 
-                self.estimator.fit(xx, yy)
+                self.estimator.fit(XX[i], YY[i])
 
                 if self.self_regress:
                     coefs_ = np.reshape(self.estimator.coef_, (self.order, n_dof)).T
@@ -146,12 +141,12 @@ class VAR():
                     scores.append(self.estimator.scores_) 
 
             coefs = np.array(coefs)
-            scores = np.array(scores)
+#            scores = np.array(scores)
 
             # Gather coefficients onto the root subcomm
             if self.subcomm.rank == 0:
                 self.coef_ = Gatherv_rows(coefs, self.rootcomm, root=0)
-                self.scores_ = Gatherv_rows(scores, self.rootcomm, root=0)
+#                self.scores_ = Gatherv_rows(scores, self.rootcomm, root=0)
 
             if self.comm.rank == 0:
                 # Re-order coefficients so model order comes first
@@ -163,6 +158,7 @@ class VAR():
             self.intercept_ = np.zeros(n_dof)
             self.coef_ = np.zeros((n_dof, n_dof, self.order))
             self.scores_ = []
+            self.supports_ = []
 
             XX, YY = _form_var_problem(y, self.order, self.self_regress)
 
@@ -179,11 +175,13 @@ class VAR():
                     coefs = coefs.T
 
                 self.coef_[i, ...] = np.fliplr(coefs)
+
                 if hasattr(self.estimator, 'intercept_'):
                     self.intercept_[i] = self.estimator.intercept_
                 if hasattr(self.estimator, 'scores_'):
                     self.scores_.append(self.estimator.scores_) 
-
+                if hasattr(self.estimator, 'supports_'):
+                    self.supports_.append(self.estimator.supports_)
 
             # Re-order coefficients so model order comes first
             self.coef_ = np.transpose(self.coef_, axes=(2, 0, 1))
@@ -221,6 +219,13 @@ class UoIVAR_Estimator(UoI_NCV):
         self.resample_type = resample_type
         self.L = L
         self.fit_type = fit_type
+
+        if fit_type == 'union_only':
+
+            uoi_kwargs['n_boots_sel'] = 1
+            uoi_kwargs['stability_selection'] = 1.
+            uoi_kwargs['selection_frac'] = 1.
+
         super(UoIVAR_Estimator, self).__init__(penalty=penalty,
                                                random_state=random_state,
                                                **uoi_kwargs)
@@ -247,17 +252,15 @@ class UoIVAR_Estimator(UoI_NCV):
         else:
             self.intercept_ = np.zeros(n_dof)
 
-    def fit(self, X, y):
+    # def fit(self, X, y):
 
-        if self.fit_type == 'uoi':
-            super(UoIVAR_Estimator, self).fit(X, y)
-        elif self.fit_type == 'union_only':
-            # Set n_boots_sel to 1 and the seletion_frac to 1 to do an ordinary fit
-            self.n_boots_sel = 1
-            self.selection_frac = 1.
-            super(UoIVAR_Estimator, self).fit(X, y)
-        else:
-            raise ValueError('Unknown fit type')
+    #     if self.fit_type == 'uoi':
+    #         super(UoIVAR_Estimator, self).fit(X, y)
+    #     elif self.fit_type == 'union_only':
+    #         # Set n_boots_sel to 1 and the seletion_frac to 1 to do an ordinary fit
+    #         super(UoIVAR_Estimator, self).fit(X, y)
+    #     else:
+    #         raise ValueError('Unknown fit type')
 
 class NCV_VAR_Estimator(PycWrapper):
 

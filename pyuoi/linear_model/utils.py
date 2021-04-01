@@ -1,6 +1,5 @@
 import numpy as np
 
-
 def stability_selection_to_threshold(stability_selection, n_boots):
     """Converts user inputted stability selection to an array of
     thresholds. These thresholds correspond to the number of bootstraps

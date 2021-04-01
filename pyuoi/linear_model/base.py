@@ -23,8 +23,6 @@ from pyuoi.mpi_utils import (Gatherv_rows, Bcast_from_root)
 from .utils import stability_selection_to_threshold, intersection
 from ..utils import check_logger
 
-import pdb
-
 class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
     r"""An abstract base class for UoI ``linear_model`` classes.
 
@@ -248,7 +246,6 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
         self.reg_params_ = self.get_reg_params(X, y)
         self.n_reg_params_ = len(self.reg_params_)
 
-
         # initialize selection
         if size > self.n_boots_sel:
             tasks = np.array_split(np.arange(self.n_boots_sel *
@@ -317,6 +314,7 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
 
             selection_coefs[ii] = np.squeeze(
                 self.uoi_selection_sweep(X_rep, y_rep, my_reg_params))
+
         # if distributed, gather selection coefficients to 0,
         # perform intersection, and broadcast results
         if size > 1:
@@ -327,6 +325,7 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
                         self.n_boots_sel,
                         self.n_reg_params_,
                         n_coef)
+                    
                 supports = self.intersect(
                     selection_coefs,
                     self.selection_thresholds_).astype(int)
@@ -342,6 +341,7 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
 
         if rank == 0:
             self._logger.info("Found %d supports" % self.n_supports_)
+            # print(self.n_supports_)
 
 
     #####################
@@ -383,6 +383,9 @@ class AbstractUoILinearModel(SparseCoefMixin, metaclass=_abc.ABCMeta):
                     np.arange(X.shape[0]),
                     sampling_frac=self.estimation_frac,
                     stratify=stratify)
+
+#                print(my_boots[boot][1])
+
 
         # score (r2/AIC/AICc/BIC) for each bootstrap for each support
         scores = np.zeros(tasks.size)
