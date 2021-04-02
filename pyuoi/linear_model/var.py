@@ -138,15 +138,15 @@ class VAR():
                 if hasattr(self.estimator, 'intercept_'):
                     intercept[idx] = self.estimator.intercept_
                 if hasattr(self.estimator, 'scores_'):
-                    scores.append(self.estimator.scores_) 
+                    # Match scores up with supports
+                    scores.append({'scores':self.estimator.scores_, 'supports':self.estimator.supports_})
 
             coefs = np.array(coefs)
-#            scores = np.array(scores)
 
             # Gather coefficients onto the root subcomm
             if self.subcomm.rank == 0:
                 self.coef_ = Gatherv_rows(coefs, self.rootcomm, root=0)
-#                self.scores_ = Gatherv_rows(scores, self.rootcomm, root=0)
+                self.scores_ = self.subcomm.gather(scores)
 
             if self.comm.rank == 0:
                 # Re-order coefficients so model order comes first
