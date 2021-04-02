@@ -8,8 +8,8 @@ from sklearn.utils import (check_X_y, compute_class_weight,
                            check_consistent_length, check_array)
 from sklearn.utils.multiclass import check_classification_targets
 from sklearn.utils.extmath import safe_sparse_dot, log_logistic, squared_norm
-from sklearn.linear_model.logistic import (_check_multi_class,
-                                           _intercept_dot)
+# from sklearn.linear_model.logistic import (_check_multi_class,
+#                                            _intercept_dot)
 from sklearn.preprocessing import StandardScaler
 
 from scipy.optimize import minimize
