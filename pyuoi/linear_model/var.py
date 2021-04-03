@@ -18,6 +18,8 @@ from numpy.lib.stride_tricks import as_strided
 
 import pdb
 import time
+import os
+import pickle
 
 # Tiered communicators
 def comm_setup(comm, ncomms):
@@ -37,10 +39,12 @@ def comm_setup(comm, ncomms):
         global_group = comm.Get_group()
         root_group = MPI.Group.Incl(global_group, subcomm_roots)
         roots_comm = comm.Create(root_group)
+
     else:
         subcomm = None
         roots_comm = None
         color = None
+        savepaths = None
 
     return comm, subcomm, roots_comm, color
 
@@ -85,6 +89,7 @@ class VAR():
                                               random_state=self.random_state, 
                                               comm = self.subcomm,
                                               **estimator_kwargs)
+
         elif estimator == 'ncv':
             self.estimator = NCV_VAR_Estimator(penalty=penalty,
                                                random_state=self.random_state,
@@ -94,7 +99,7 @@ class VAR():
                                              **estimator_kwargs)
 
 
-    def fit(self, y):
+    def fit(self, y, distributed_save=False, savepath=None):
         """
             y: ndarray of shape (n_samples, n_dof)
                or (n_trials, n_samples, n_dof)
@@ -106,6 +111,19 @@ class VAR():
             n_trials, n_samples, n_dof = y.shape
         else:
             raise ValueError('Shape of y must be either (n_samples, n_dof) or (n_trials, n_samples, n_dof)')
+
+        # Setup directory for distributed save
+        if self.comm is not None and distributed_save:
+            if self.comm.rank == 0:
+                if not os.path.exists(savepath):
+                    os.makedirs(savepath)
+        elif distributed_save:
+            if not os.path.exists(savepath):
+                os.makedirs(savepath)
+
+        savepaths = []
+        for i in range(n_dof):
+            savepaths.append('%s/%s.dat' % (savepath, i))
 
         # Regress each column (feature) against all the others
 
@@ -124,7 +142,10 @@ class VAR():
             for idx, i in enumerate(task_list):
                 print('Rank %d working on task %d' % (self.comm.rank, i))
 
-                self.estimator.fit(XX[i], YY[i])
+                if distributed_save:
+                    self.estimator.fit(XX[i], YY[i], savepaths[i])
+                else:
+                    self.estimator.fit(XX[i], YY[i])
 
                 if self.self_regress:
                     coefs_ = np.reshape(self.estimator.coef_, (self.order, n_dof)).T
@@ -252,15 +273,21 @@ class UoIVAR_Estimator(UoI_NCV):
         else:
             self.intercept_ = np.zeros(n_dof)
 
-    # def fit(self, X, y):
+    def fit(self, X, y, savepath=None):
+        super(UoIVAR_Estimator, self).fit(X, y)
+        
+        if savepath is not None:
 
-    #     if self.fit_type == 'uoi':
-    #         super(UoIVAR_Estimator, self).fit(X, y)
-    #     elif self.fit_type == 'union_only':
-    #         # Set n_boots_sel to 1 and the seletion_frac to 1 to do an ordinary fit
-    #         super(UoIVAR_Estimator, self).fit(X, y)
-    #     else:
-    #         raise ValueError('Unknown fit type')
+            if self.comm is not None:
+                if self.comm.rank == 0:
+                    with open(savepath, 'wb') as f:
+                        f.write(pickle.dumps(self.coef_))
+                        f.write(pickle.dumps({'scores':self.scores_, 'supports':self.supports_}))
+            else:
+                with open(savepath, 'wb') as f:
+                    f.write(pickle.dumps(self.coef_))
+                    f.write(pickle.dumps({'scores':self.scores_, 'supports':self.supports_}))
+
 
 class NCV_VAR_Estimator(PycWrapper):
 
