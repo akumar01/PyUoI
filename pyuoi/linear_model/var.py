@@ -38,15 +38,18 @@ def comm_setup(comm, ncomms):
         # Setup a root communicator that links the roots of each subcomm
         global_group = comm.Get_group()
         root_group = MPI.Group.Incl(global_group, subcomm_roots)
+        print('rank: %d, color %d, subcomm_rank: %d, root_group_rank: %d' % (rank, color, subcomm.rank, root_group.rank))
         roots_comm = comm.Create(root_group)
+
 
     else:
         subcomm = None
         roots_comm = None
         color = None
         savepaths = None
+        root_group = None
 
-    return comm, subcomm, roots_comm, color
+    return comm, subcomm, roots_comm, color, root_group
 
 
 class VAR():
@@ -78,10 +81,11 @@ class VAR():
         self.comm = comm
         self.ncomms = ncomms
 
-        comm, subcomm, rootcomm, color = comm_setup(self.comm, self.ncomms)
+        comm, subcomm, rootcomm, color, root_group = comm_setup(self.comm, self.ncomms)
 
         self.subcomm = subcomm
         self.rootcomm = rootcomm
+        self.root_group = root_group
         self.color = color
 
         if estimator == 'uoi':
@@ -96,8 +100,10 @@ class VAR():
                                                **estimator_kwargs)
         elif estimator == 'ols':
             self.estimator = VAR_OLS_Wrapper(standalone=True,
+                                             normalize=True,
                                              **estimator_kwargs)
-
+        else: 
+            raise ValueError('Unknown estimator')
 
     def fit(self, y, distributed_save=False, savepath=None):
         """
@@ -115,6 +121,7 @@ class VAR():
         # Setup directory for distributed save
         if self.comm is not None and distributed_save:
             if self.comm.rank == 0:
+                print('Initializing save directory')
                 if not os.path.exists(savepath):
                     os.makedirs(savepath)
         elif distributed_save:
@@ -140,7 +147,7 @@ class VAR():
             XX, YY = _form_var_problem(y, self.order, self.self_regress)
 
             for idx, i in enumerate(task_list):
-                print('Rank %d working on task %d' % (self.comm.rank, i))
+#                print('Rank %d working on task %d' % (self.comm.rank, i))
 
                 if distributed_save:
                     self.estimator.fit(XX[i], YY[i], savepaths[i])
@@ -165,10 +172,10 @@ class VAR():
             coefs = np.array(coefs)
 
             # Gather coefficients onto the root subcomm
-            if self.subcomm.rank == 0:
+            # This check is a bit of a hack (?)
+            if self.root_group.rank >= 0:
                 self.coef_ = Gatherv_rows(coefs, self.rootcomm, root=0)
-                self.scores_ = self.subcomm.gather(scores)
-
+                self.scores_ = self.rootcomm.gather(scores)
             if self.comm.rank == 0:
                 # Re-order coefficients so model order comes first
                 self.coef_ = np.transpose(self.coef_, axes=(2, 0, 1))
@@ -182,6 +189,8 @@ class VAR():
             self.supports_ = []
 
             XX, YY = _form_var_problem(y, self.order, self.self_regress)
+            # self.XX = XX
+            # self.YY = YY
 
             for i in range(n_dof):
 
@@ -223,7 +232,7 @@ class VAR():
         return y_pred, y[self.order:]
 
     def score(self, y, metric='r2'):
-        y_pred, y = self.predict(y)
+        y_pred, y = self.predict(y) 
         if metric == 'r2':
             score = r2_score(y, y_pred)
 
@@ -280,6 +289,7 @@ class UoIVAR_Estimator(UoI_NCV):
 
             if self.comm is not None:
                 if self.comm.rank == 0:
+                    print('Saving!')
                     with open(savepath, 'wb') as f:
                         f.write(pickle.dumps(self.coef_))
                         f.write(pickle.dumps({'scores':self.scores_, 'supports':self.supports_}))
@@ -392,6 +402,13 @@ class VAR_OLS_Wrapper(LinearRegression):
 def form_lag_matrix(X, T, y=None, stride=1, stride_tricks=True,
                     writeable=False):
     
+    # Do nothing
+    if T == 0:
+        if y is not None: 
+            return X, y
+        else:
+            return X
+
     if X.ndim == 2:
         return _form_lag_matrix(X, T, y=y, stride=stride, stride_tricks=stride_tricks,
                                 writeable=writeable)
@@ -462,7 +479,7 @@ def _form_lag_matrix(X, T, y=None, stride=1, stride_tricks=True,
 
     # Trim off the beginning
     if y is not None:
-        y = y[y.size - n_lagged_samples + 1:]
+        y = y[y.shape[0] - n_lagged_samples + 1:]
 
     return X_with_lags, y
 
