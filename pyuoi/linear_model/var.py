@@ -144,15 +144,16 @@ class VAR():
             coefs = []
 
             intercept = np.zeros(num_tasks)
-            XX, YY = _form_var_problem(y, self.order, self.self_regress)
+            # XX, YY = _form_var_problem(y, self.order, self.self_regress)
 
             for idx, i in enumerate(task_list):
-#                print('Rank %d working on task %d' % (self.comm.rank, i))
+                print('Rank %d working on task %d' % (self.comm.rank, i))
+                xx, yy = _form_var_problem(y, i, self.order, self.self_regress)
 
                 if distributed_save:
-                    self.estimator.fit(XX[i], YY[i], savepaths[i])
+                    self.estimator.fit(xx, yy, savepaths[i])
                 else:
-                    self.estimator.fit(XX[i], YY[i])
+                    self.estimator.fit(xx, yy)
 
                 if self.self_regress:
                     coefs_ = np.reshape(self.estimator.coef_, (self.order, n_dof)).T
@@ -188,13 +189,10 @@ class VAR():
             self.scores_ = []
             self.supports_ = []
 
-            XX, YY = _form_var_problem(y, self.order, self.self_regress)
-            # self.XX = XX
-            # self.YY = YY
-
             for i in range(n_dof):
-
-                self.estimator.fit(XX[i], YY[i])
+                print('Row %d' % i)
+                xx, yy = _form_var_problem(y, i, self.order, self.self_regress)
+                self.estimator.fit(xx, yy)
 
                 if self.self_regress:
                     coefs = np.reshape(self.estimator.coef_, (self.order, n_dof)).T
@@ -418,15 +416,14 @@ def form_lag_matrix(X, T, y=None, stride=1, stride_tricks=True,
         # Separately lag each trial and then concatenate
         xx = []
         yy = []
+
         for i in range(X.shape[0]):
+            # print('Forming lag matrix')
             xxlag, yylag = _form_lag_matrix(X[i, ...], T, y=y[i, ...], stride=stride, 
                                             stride_tricks=stride_tricks,
                                             writeable=writeable) 
             xx.append(xxlag)
             yy.append(yylag)
-
-        xx = np.concatenate(xx)
-        yy = np.concatenate(yy)
 
         return xx, yy
 
@@ -457,7 +454,6 @@ def _form_lag_matrix(X, T, y=None, stride=1, stride_tricks=True,
         Timeseries with lags.
     """
 
-
     if not isinstance(stride, int) or stride < 1:
         raise ValueError('stride should be an int and greater than or equal to 1.')
     N = X.shape[1]
@@ -484,19 +480,17 @@ def _form_lag_matrix(X, T, y=None, stride=1, stride_tricks=True,
     return X_with_lags, y
 
 # Given a time series, return a sequence of regression problems 
-def _form_var_problem(y, T, self_regress=False):
+def _form_var_problem(y, i, T, self_regress=False):
 
-    XX = []
-    YY = []
+    if self_regress:
+        xx, yy = form_lag_matrix(y, T, y[..., i])
+    else:
+        xx, yy = form_lag_matrix(y[..., np.arange(y.shape[-1]) != i], T, y[..., i])                
 
-    for i in range(y.shape[-1]):
+    xx = np.array(xx)
+    yy = np.array(yy)
 
-        if self_regress:
-            xx, yy = form_lag_matrix(y, T, y[..., i])
-        else:
-            xx, yy = form_lag_matrix(y[..., np.arange(y.shape[-1]) != i], T, y[..., i])                
+    xx = np.reshape(xx, (-1, xx.shape[-1]))
+    yy = np.reshape(yy, (-1,))[:, np.newaxis]
 
-        XX.append(xx)
-        YY.append(yy)
-
-    return XX, YY
+    return xx, yy
