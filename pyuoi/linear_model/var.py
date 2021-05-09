@@ -20,6 +20,7 @@ import pdb
 import time
 import os
 import pickle
+import glob
 
 # Tiered communicators
 def comm_setup(comm, ncomms):
@@ -105,7 +106,7 @@ class VAR():
         else: 
             raise ValueError('Unknown estimator')
 
-    def fit(self, y, distributed_save=False, savepath=None):
+    def fit(self, y, distributed_save=False, savepath=None, resume=False):
         """
             y: ndarray of shape (n_samples, n_dof)
                or (n_trials, n_samples, n_dof)
@@ -118,6 +119,7 @@ class VAR():
         else:
             raise ValueError('Shape of y must be either (n_samples, n_dof) or (n_trials, n_samples, n_dof)')
 
+
         # Setup directory for distributed save
         if self.comm is not None and distributed_save:
             if self.comm.rank == 0:
@@ -128,8 +130,19 @@ class VAR():
             if not os.path.exists(savepath):
                 os.makedirs(savepath)
 
+        task_list = np.arange(n_dof)
+
+        # Check against already completed
+        if distributed_save and resume:
+            completed = glob.glob('%s/*.dat' % savepath)
+            completed_idxs = [int(c.split('/')[-1].split('.dat')[0]) 
+                              for c in completed]
+
+            # Remove completed from task_list
+            task_list = np.setdiff1d(task_list)
+
         savepaths = []
-        for i in range(n_dof):
+        for i in task_list:
             savepaths.append('%s/%s.dat' % (savepath, i))
 
         # Regress each column (feature) against all the others
@@ -137,7 +150,8 @@ class VAR():
         # Spread each row across mpi tasks. If ncomms is > 1, we also spread
         # estimation of each row
         if self.comm is not None:
-            task_list = np.array_split(np.arange(n_dof), self.ncomms)[self.color]
+            task_list = np.array_split(task_list, self.ncomms)[self.color]
+
             num_tasks = len(task_list)
 
             scores = []
@@ -148,7 +162,8 @@ class VAR():
 
             for idx, i in enumerate(task_list):
                 print('Rank %d working on task %d' % (self.comm.rank, i))
-                xx, yy = _form_var_problem(y, i, self.order, self.self_regress)
+                xx, yy = _form_var_problem(y, i, self.order, self.self_regress, 
+                                           self.comm, self.subcomm)
 
                 if distributed_save:
                     self.estimator.fit(xx, yy, savepaths[i])
