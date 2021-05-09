@@ -288,6 +288,7 @@ class UoIVAR_Estimator(UoI_NCV):
             if self.comm is not None:
                 if self.comm.rank == 0:
                     print('Saving!')
+                    print(list(self.__dict__.keys()))
                     with open(savepath, 'wb') as f:
                         f.write(pickle.dumps(self.coef_))
                         f.write(pickle.dumps({'scores':self.scores_, 'supports':self.supports_}))
