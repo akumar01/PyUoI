@@ -290,7 +290,7 @@ class UoIVAR_Estimator(UoI_NCV):
                     print('Saving!')
                     with open(savepath, 'wb') as f:
                         f.write(pickle.dumps(self.coef_))
-                        f.write(pickle.dumps({'scores':self.scores_, 'supports':self.supports_}))
+                        f.write(pickle.dumps({'supports':self.supports_}))
             else:
                 with open(savepath, 'wb') as f:
                     f.write(pickle.dumps(self.coef_))
@@ -411,17 +411,23 @@ def form_lag_matrix(X, T, y=None, stride=1, stride_tricks=True,
         return _form_lag_matrix(X, T, y=y, stride=stride, stride_tricks=stride_tricks,
                                 writeable=writeable)
     elif X.ndim == 3:
-        if y is not None and y.ndim !=2:
-            raise ValueError('y passed in with non-standard dimension.')
+        # if y is not None and y.ndim !=2:
+        #     raise ValueError('y passed in with non-standard dimension.')
         # Separately lag each trial and then concatenate
         xx = []
         yy = []
 
         for i in range(X.shape[0]):
             # print('Forming lag matrix')
-            xxlag, yylag = _form_lag_matrix(X[i, ...], T, y=y[i, ...], stride=stride, 
-                                            stride_tricks=stride_tricks,
-                                            writeable=writeable) 
+            if y is not None:
+                xxlag, yylag = _form_lag_matrix(X[i, ...], T, y=y[i, ...], stride=stride, 
+                                                stride_tricks=stride_tricks,
+                                                writeable=writeable) 
+            else:
+                xxlag, yylag = _form_lag_matrix(X[i, ...], T, None, stride=stride, 
+                                                stride_tricks=stride_tricks,
+                                                writeable=writeable) 
+
             xx.append(xxlag)
             yy.append(yylag)
 
