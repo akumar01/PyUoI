@@ -39,7 +39,7 @@ def comm_setup(comm, ncomms):
         # Setup a root communicator that links the roots of each subcomm
         global_group = comm.Get_group()
         root_group = MPI.Group.Incl(global_group, subcomm_roots)
-        print('rank: %d, color %d, subcomm_rank: %d, root_group_rank: %d' % (rank, color, subcomm.rank, root_group.rank))
+        # print('rank: %d, color %d, subcomm_rank: %d, root_group_rank: %d' % (rank, color, subcomm.rank, root_group.rank))
         roots_comm = comm.Create(root_group)
 
 
@@ -140,7 +140,7 @@ class VAR():
 
             # Remove completed from task_list
             task_list = np.setdiff1d(task_list, completed_idxs)
-
+            print('Outstanding Task List: %s' task_list)
         
         if len(task_list) > 0:
         
