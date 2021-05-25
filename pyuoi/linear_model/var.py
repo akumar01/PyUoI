@@ -139,60 +139,96 @@ class VAR():
                               for c in completed]
 
             # Remove completed from task_list
-            task_list = np.setdiff1d(task_list)
+            task_list = np.setdiff1d(task_list, completed_idxs)
 
-        savepaths = []
-        for i in task_list:
-            savepaths.append('%s/%s.dat' % (savepath, i))
+        
+        if len(task_list) > 0:
+        
+            savepaths = []
+            for i in task_list:
+                savepaths.append('%s/%s.dat' % (savepath, i))
 
-        # Regress each column (feature) against all the others
+            # Regress each column (feature) against all the others
 
-        # Spread each row across mpi tasks. If ncomms is > 1, we also spread
-        # estimation of each row
-        if self.comm is not None:
-            task_list = np.array_split(task_list, self.ncomms)[self.color]
+            # Spread each row across mpi tasks. If ncomms is > 1, we also spread
+            # estimation of each row
+            if self.comm is not None:
+                task_list = np.array_split(task_list, self.ncomms)[self.color]
 
-            num_tasks = len(task_list)
+                num_tasks = len(task_list)
 
-            scores = []
-            coefs = []
+                scores = []
+                coefs = []
 
-            intercept = np.zeros(num_tasks)
-            # XX, YY = _form_var_problem(y, self.order, self.self_regress)
+                intercept = np.zeros(num_tasks)
+                # XX, YY = _form_var_problem(y, self.order, self.self_regress)
 
-            for idx, i in enumerate(task_list):
-                print('Rank %d working on task %d' % (self.comm.rank, i))
-                xx, yy = _form_var_problem(y, i, self.order, self.self_regress, 
-                                           self.comm, self.subcomm)
+                for idx, i in enumerate(task_list):
+                    print('Rank %d working on task %d' % (self.comm.rank, i))
+                    xx, yy = _form_var_problem(y, i, self.order, self.self_regress)
 
-                if distributed_save:
-                    self.estimator.fit(xx, yy, savepaths[i])
-                else:
+                    if distributed_save:
+                        self.estimator.fit(xx, yy, savepaths[idx])
+                    else:
+                        self.estimator.fit(xx, yy)
+
+                    if self.self_regress:
+                        coefs_ = np.reshape(self.estimator.coef_, (self.order, n_dof)).T
+                    else:
+                        coefs_ = np.zeros((self.order, n_dof))
+                        coefs_[:, np.arange(n_dof) != i] = np.reshape(self.estimator.coef_, 
+                                                                      (self.order, n_dof - 1))
+                        coefs_ = coefs_.T
+
+                    coefs.append(np.fliplr(coefs_))
+                    if hasattr(self.estimator, 'intercept_'):
+                        intercept[idx] = self.estimator.intercept_
+                    if hasattr(self.estimator, 'scores_'):
+                        # Match scores up with supports
+                        scores.append({'scores':self.estimator.scores_, 'supports':self.estimator.supports_})
+
+                coefs = np.array(coefs)
+
+                if not distributed_save:
+                    # Gather coefficients onto the root subcomm
+                    # This check is a bit of a hack (?)
+                    if self.root_group.rank >= 0:
+                        self.coef_ = Gatherv_rows(coefs, self.rootcomm, root=0)
+                        self.scores_ = self.rootcomm.gather(scores)
+                    if self.comm.rank == 0:
+                        # Re-order coefficients so model order comes first
+                        self.coef_ = np.transpose(self.coef_, axes=(2, 0, 1))
+
+            else:
+
+                # Statistics to track
+                self.intercept_ = np.zeros(n_dof)
+                self.coef_ = np.zeros((n_dof, n_dof, self.order))
+                self.scores_ = []
+                self.supports_ = []
+
+                for i in range(n_dof):
+                    print('Row %d' % i)
+                    xx, yy = _form_var_problem(y, i, self.order, self.self_regress)
                     self.estimator.fit(xx, yy)
 
-                if self.self_regress:
-                    coefs_ = np.reshape(self.estimator.coef_, (self.order, n_dof)).T
-                else:
-                    coefs_ = np.zeros((self.order, n_dof))
-                    coefs_[:, np.arange(n_dof) != i] = np.reshape(self.estimator.coef_, 
-                                                                  (self.order, n_dof - 1))
-                    coefs_ = coefs_.T
+                    if self.self_regress:
+                        coefs = np.reshape(self.estimator.coef_, (self.order, n_dof)).T
+                    else:
+                        coefs = np.zeros((self.order, n_dof))
+                        coefs[:, np.arange(n_dof) != i] = np.reshape(self.estimator.coef_, 
+                                                                     (self.order, n_dof - 1))
+                        coefs = coefs.T
 
-                coefs.append(np.fliplr(coefs_))
-                if hasattr(self.estimator, 'intercept_'):
-                    intercept[idx] = self.estimator.intercept_
-                if hasattr(self.estimator, 'scores_'):
-                    # Match scores up with supports
-                    scores.append({'scores':self.estimator.scores_, 'supports':self.estimator.supports_})
+                    self.coef_[i, ...] = np.fliplr(coefs)
 
-            coefs = np.array(coefs)
+                    if hasattr(self.estimator, 'intercept_'):
+                        self.intercept_[i] = self.estimator.intercept_
+                    if hasattr(self.estimator, 'scores_'):
+                        self.scores_.append(self.estimator.scores_) 
+                    if hasattr(self.estimator, 'supports_'):
+                        self.supports_.append(self.estimator.supports_)
 
-            # Gather coefficients onto the root subcomm
-            # This check is a bit of a hack (?)
-            if self.root_group.rank >= 0:
-                self.coef_ = Gatherv_rows(coefs, self.rootcomm, root=0)
-                self.scores_ = self.rootcomm.gather(scores)
-            if self.comm.rank == 0:
                 # Re-order coefficients so model order comes first
                 self.coef_ = np.transpose(self.coef_, axes=(2, 0, 1))
 
