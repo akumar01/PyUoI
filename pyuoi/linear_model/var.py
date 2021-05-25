@@ -205,7 +205,7 @@ class VAR():
             self.supports_ = []
 
             for i in range(n_dof):
-                print('Row %d' % i)
+                # print('Row %d' % i)
                 xx, yy = _form_var_problem(y, i, self.order, self.self_regress)
                 self.estimator.fit(xx, yy)
 
@@ -236,17 +236,35 @@ class VAR():
     # Forecast the time evolution of y
     def predict(self, y):
 
-        y_pred = np.zeros((y.shape[0] - self.order, y.shape[1]))
+        y = np.array(y)
 
-        for i in range(y_pred.shape[0]):
-            y_pred[i, :] = np.sum(np.vstack([y[i + self.order - j - 1] @ self.coef_[j, ...] 
-                                  for j in range(self.coef_.shape[0])]), axis=0)
-        # # Return a trimmed version of y for proper comparison with y_pred
-        return y_pred, y[self.order:]
+        if np.ndim(y) == 3:
+            y_pred = np.zeros((y.shape[0], y.shape[1] - self.order, y.shape[2]))
+            for i in range(y_pred.shape[0]):
+                for j in range(y_pred.shape[1]):
+                    y_pred[i, j, :] = np.sum(np.vstack([y[i, j + self.order - k - 1] @ self.coef_[k, ...].T 
+                                          for k in range(self.coef_.shape[0])]), axis=0)
 
-    def score(self, y, metric='r2'):
+            return y_pred, y[:, self.order:, :]
+
+        else:
+
+            y_pred = np.zeros((y.shape[0] - self.order, y.shape[1]))
+
+            for i in range(y_pred.shape[0]):
+                y_pred[i, :] = np.sum(np.vstack([y[i + self.order - j - 1] @ self.coef_[j, ...].T 
+                                      for j in range(self.coef_.shape[0])]), axis=0)
+
+            # # Return a trimmed version of y for proper comparison with y_pred
+            return y_pred, y[self.order:]
+
+    def score(self, y):
         y_pred, y = self.predict(y) 
-        if metric == 'r2':
+
+        # Trial avergae
+        if np.ndim(y) == 3:
+            score = np.mean([r2_score(y[i, ...], y_pred[i, ...]) for i in range(y.shape[0])])
+        else:
             score = r2_score(y, y_pred)
 
         return score
@@ -338,12 +356,13 @@ class NCV_VAR_Estimator(PycWrapper):
 
         alphas = _alpha_grid(X, y)
         self.set_params(alphas=alphas)
-
         super(NCV_VAR_Estimator, self).fit(X, y, cross_validate=self.cross_validate)
         self.all_coef = self.coef_
         self.select(X, y)
 
     def select(self, X, y):
+
+        y = np.squeeze(y)
 
         if self.selection_method == 'BIC':
 
@@ -384,7 +403,7 @@ class NCV_VAR_Estimator(PycWrapper):
 class VAR_OLS_Wrapper(LinearRegression):
 
     def __init__(self, fit_intercept=False, normalize=False, 
-                 copy_X=True, n_jobs=None, standalone=False):
+                 copy_X=True, n_jobs=None, standalone=False, **kwargs):
 
         self.standalone = standalone
         super(VAR_OLS_Wrapper, self).__init__(fit_intercept=fit_intercept,

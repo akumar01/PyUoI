@@ -2,6 +2,7 @@ import numpy as np
 import sys
 import logging
 import pdb
+from sklearn.metrics import r2_score
 
 def softmax(y, axis=-1):
     """Calculates the softmax distribution.
@@ -48,6 +49,9 @@ def log_likelihood_glm(model, y_true, y_pred):
     ll : float
         The log-likelihood.
     """
+
+    y_true = np.squeeze(y_true)
+    y_pred = np.squeeze(y_pred)
 
     # If y_true is of a different size than y_pred, trim away the beginning 
     # of y_true (used in autoregressive models)
@@ -142,6 +146,36 @@ def AICc(ll, n_features, n_samples):
     if n_samples > (n_features + 1):
         AICc += 2 * (n_features**2 + n_features) / (n_samples - n_features - 1)
     return AICc
+
+# mixture coding MDL criteria (eq. 34 in Hansen and Yu)
+# k : number of features in model 
+# n : number of samples
+def gMDL(y_true, y_pred, k):
+    
+    # Doesn't seem to be able to handle the k = 0 case
+    if k == 0:
+        return np.inf
+
+    y_true = np.squeeze(y_true)
+    y_pred = np.squeeze(y_pred)
+
+    n = y_true.size
+    threshold = k/n
+    r2 = r2_score(y_true, y_pred)
+
+    RSS = np.sum((y_true - y_pred)**2)
+    S = RSS/(n - k)
+    F = (np.sum(y_true**2) - RSS)/(k * S)
+
+    if r2 > threshold:
+        penalty = k/2 * np.log(F) + np.log(n)
+        gMDL = n/2 * np.log(S) + k/2 * np.log(F) + np.log(n)
+    else:
+        penalty = 1/2 * np.log(n)
+        gMDL = n/2 * np.log(np.sum(y_true**2)/n) + 1/2 * np.log(n)
+
+    return gMDL
+
 
 
 def check_logger(logger, name='uoi', comm=None):

@@ -527,11 +527,11 @@ class AbstractUoILinearRegressor(AbstractUoILinearModel,
                                  metaclass=_abc.ABCMeta):
     """An abstract base class for UoI linear regression classes."""
 
-    _valid_estimation_metrics = ('r2', 'AIC', 'AICc', 'BIC')
+    _valid_estimation_metrics = ('r2', 'AIC', 'AICc', 'BIC', 'gMDL')
 
     _train_test_map = {'train': 0, 'test': 1}
 
-    _default_est_targets = {'r2': 1, 'AIC': 0, 'AICc': 0, 'BIC': 0}
+    _default_est_targets = {'r2': 1, 'AIC': 0, 'AICc': 0, 'BIC': 0, 'gMDL': 0}
 
     def __init__(self, n_boots_sel=24, n_boots_est=24, selection_frac=0.9,
                  estimation_frac=0.9, stability_selection=1.,
@@ -660,6 +660,9 @@ class AbstractUoILinearRegressor(AbstractUoILinearModel,
 
         if metric == 'r2':
             score = r2_score(y, y_pred)
+        elif metric == 'gMDL':
+            score = utils.gMDL(y, y_pred, np.count_nonzero(support))
+            score = -score
         else:
             ll = utils.log_likelihood_glm(model='normal',
                                           y_true=y,
