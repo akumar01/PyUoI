@@ -140,7 +140,7 @@ class VAR():
 
             # Remove completed from task_list
             task_list = np.setdiff1d(task_list, completed_idxs)
-            print('Outstanding Task List: %s' task_list)
+            print('Outstanding Task List: %s' % task_list)
         
         if len(task_list) > 0:
         
@@ -232,43 +232,6 @@ class VAR():
 
                 # Re-order coefficients so model order comes first
                 self.coef_ = np.transpose(self.coef_, axes=(2, 0, 1))
-
-        else:
-
-            # Statistics to track
-            self.intercept_ = np.zeros(n_dof)
-            self.coef_ = np.zeros((n_dof, n_dof, self.order))
-            self.scores_ = []
-            self.supports_ = []
-
-            for i in range(n_dof):
-                # print('Row %d' % i)
-                xx, yy = _form_var_problem(y, i, self.order, self.self_regress)
-                self.estimator.fit(xx, yy)
-
-                if self.self_regress:
-                    coefs = np.reshape(self.estimator.coef_, (self.order, n_dof)).T
-                else:
-                    coefs = np.zeros((self.order, n_dof))
-                    coefs[:, np.arange(n_dof) != i] = np.reshape(self.estimator.coef_, 
-                                                                 (self.order, n_dof - 1))
-                    coefs = coefs.T
-
-                self.coef_[i, ...] = np.fliplr(coefs)
-
-                if hasattr(self.estimator, 'intercept_'):
-                    self.intercept_[i] = self.estimator.intercept_
-                if hasattr(self.estimator, 'scores_'):
-                    self.scores_.append(self.estimator.scores_) 
-                if hasattr(self.estimator, 'supports_'):
-                    self.supports_.append(self.estimator.supports_)
-
-            # Re-order coefficients so model order comes first
-            self.coef_ = np.transpose(self.coef_, axes=(2, 0, 1))
-        # # Re-order coefficients so AR(1) coefficient comes first in
-        # # the last axis
-        # self.coef_ = np.transpose(self.coef_, axes=(1, 0, 2))
-        # self.coef_ = np.flip(self.coef_, axis=-1)
 
     # Forecast the time evolution of y
     def predict(self, y):
