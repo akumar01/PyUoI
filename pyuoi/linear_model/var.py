@@ -154,6 +154,7 @@ class VAR():
             # estimation of each row
             if self.comm is not None:
                 task_list = np.array_split(task_list, self.ncomms)[self.color]
+                savepaths = np.array_split(savepaths, self.ncomms)[self.color]
 
                 num_tasks = len(task_list)
 
